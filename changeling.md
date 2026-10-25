@@ -1,3 +1,7 @@
+# Changelog
+
+## v1.0.0-beta
+
 The first public beta of Atlas CRT, a CRT and analog video emulator that runs in the browser. Open a photo or video, shape the look, and export a PNG or a video. Everything renders on your GPU, and nothing is uploaded.
 
 Try it at https://atlas-crt.nathanetes.com
