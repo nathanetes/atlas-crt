@@ -57,7 +57,16 @@ Each module has its own on/off switch and reset.
 
 ## Looks
 
-The factory looks have been taken out while the renderer is rebuilt, and will be redone for the new shaders. Save your own under **mine**. Saved looks keep settings and automation, and live in your browser's local storage. The previous 35 looks are kept for reference in `docs/presets-pre-linear.js`; the app doesn't load them.
+33 factory looks in six groups, built for the linear-light renderer:
+
+- **TV:** Living Room Tube, Broadcast Monitor, Tokyo Trinitron, Arcade Cabinet, Console on Composite, Big Pixel Max, Pastel Dream
+- **Tape:** VHS Camcorder, Rental Tape EP, Betamax Archive, S-VHS Master, Haunted Tape, Late Night Ad
+- **Camera:** Phone Off Screen, Rainbow Grille, Filmed Off TV, Rolling Shutter, 16mm Print, Night Shift
+- **Terminal:** Terminal Glow, Green Phosphor, Amber Monitor, Paper White
+- **Color:** Teal Night, Cross Processed, Duotone, Bleach Bypass
+- **Glitch:** Datamosh Bloom, Bent Circuit, Loose Cable, Chroma Storm, Feedback Bloom, Lost Sync
+
+Looks don't change the raster, so pick **480i** yourself for interlaced footage. Save your own looks under **mine**. Saved looks keep settings and automation, and live in your browser's local storage. The looks from before the linear-light renderer are kept for reference in `docs/presets-pre-linear.js`; the app doesn't load them.
 
 ## Exporting
 

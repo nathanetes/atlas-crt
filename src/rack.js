@@ -317,11 +317,12 @@
     Object.assign(state.enabled, saved.enabled || {});
     state.auto = saved.auto || {};
     state.look = saved.look || null;
-    const cur = PRESETS.find((p) => p.name === state.look);
-    if (cur) cat = cur.cat;
   } else {
     applyLook(PRESETS.find((p) => p.name === 'Terminal Glow') || { name: null, p: {} });
   }
+  // open the looks tab on the active look's category
+  const cur = PRESETS.find((p) => p.name === state.look);
+  if (cur) cat = cur.cat;
   const q = store('atlas.quality');
   if (q) document.querySelector(`#quality button[data-q="${q}"]`)?.click();
   const o = store('atlas.out');
