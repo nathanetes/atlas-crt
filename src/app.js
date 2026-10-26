@@ -1,6 +1,7 @@
-// Atlas CRT app: media loading, render loop, transport, control rack, looks.
+// Atlas CRT app core: engine, effective parameters (automation and macros), media loading,
+// render loop, transport and preview sizing. The control rack is in rack.js.
 (function () {
-  const { MASTER, GROUPS, DEFAULTS, PRESETS } = window.AtlasParams;
+  const { MACROS, GROUPS, DEFAULTS, BY_KEY } = window.AtlasParams;
   const $ = (id) => document.getElementById(id);
   const canvas = $('out');
   const K = (window.Atlas = {});
@@ -26,7 +27,9 @@
     split: 0.5,
     compare: false,
     playing: true,
+    auto: {}, // key -> { shape, rate (Hz), depth (0..1 of the range), phase, seed }
   });
+  let clock = 0, frame = 0, last = performance.now();
 
   // ------------------------------------------------------------ helpers
   function toast(msg) {
@@ -43,6 +46,7 @@
     return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
   };
 
+  K.store = store;
   function store(key, val) {
     try {
       if (val === undefined) return JSON.parse(localStorage.getItem(key) || 'null');
@@ -50,8 +54,43 @@
     } catch (e) { return null; }
   }
 
-  K.effective = function () {
+  // ------------------------------------------------------------ automation
+  // Each automated slider swings around its set value; time is the effect clock, so
+  // exports repeat exactly what the preview showed.
+  const frac = (x) => x - Math.floor(x);
+  const rnd = (n, seed) => frac(Math.sin(n * 127.1 + seed * 311.7) * 43758.5453);
+  const WAVES = {
+    sine: (x) => Math.sin(x * 2 * Math.PI),
+    triangle: (x) => 1 - 4 * Math.abs(frac(x + 0.25) - 0.5),
+    saw: (x) => 2 * frac(x) - 1,
+    square: (x) => (frac(x) < 0.5 ? 1 : -1),
+    random: (x, s) => rnd(Math.floor(x), s) * 2 - 1,
+    drift: (x, s) => {
+      const i = Math.floor(x), f = frac(x), e = f * f * (3 - 2 * f);
+      return (rnd(i, s) * (1 - e) + rnd(i + 1, s) * e) * 2 - 1;
+    },
+  };
+  K.WAVES = Object.keys(WAVES);
+  K.live = {};
+
+  K.effective = function (time = clock) {
     const p = { ...state.params };
+    const clamp = (c, v) => Math.min(c.max, Math.max(c.min, v));
+    for (const k in state.auto) {
+      const a = state.auto[k], c = BY_KEY[k];
+      if (!c || c.opts) continue;
+      p[k] = clamp(c, p[k] + (c.max - c.min) * 0.5 * a.depth * WAVES[a.shape](time * a.rate + a.phase, a.seed));
+      K.live[k] = p[k];
+    }
+    for (const m of MACROS) {
+      const f = p[m.k];
+      delete p[m.k];
+      if (Math.abs(f - 1) < 1e-4) continue;
+      for (const k of m.keys) {
+        const c = BY_KEY[k], n = c.n !== undefined ? c.n : c.min;
+        p[k] = clamp(c, n + (p[k] - n) * f);
+      }
+    }
     const dirt = 1 - p.clean;
     for (const g of GROUPS) {
       for (const c of g.controls) {
@@ -229,19 +268,10 @@
     $('badge').textContent = `${state.quality} ${r.w}×${r.h} → ${engine.expW}×${engine.expH}`;
   }
 
-  document.querySelectorAll('#quality button').forEach((b) => {
-    b.onclick = () => {
-      state.quality = b.dataset.q;
-      document.querySelectorAll('#quality button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-      engine.setQuality(state.quality);
-      updateBadge();
-      store('atlas.quality', state.quality);
-    };
-  });
-  $('outSize').onchange = (e) => { state.out = e.target.value; applyOutput(); store('atlas.out', state.out); };
+  K.setQuality = (q) => { state.quality = q; engine.setQuality(q); updateBadge(); };
+  K.setOut = (o) => { state.out = o; applyOutput(); };
 
   // ------------------------------------------------------------ render loop
-  let clock = 0, frame = 0, last = performance.now();
   K.clockNow = () => clock;
   K.hooks = [];
   function tick(now) {
@@ -386,217 +416,6 @@
     else if (e.key === 'z' || e.key === 'Z') $('zoomBtn').click();
   });
 
-  // ------------------------------------------------------------ control rack
-  const rows = new Map();
-  const decimals = (c) => (c.step >= 1 ? 0 : c.step >= 0.1 ? 1 : c.step >= 0.01 ? 2 : 3);
-  function fmtVal(c, v) {
-    if (c.opts) { const o = c.opts.find((x) => x.v === v); return o ? o.l : String(v); }
-    return v.toFixed(decimals(c)) + (c.u ? ' ' + c.u : '');
-  }
-
-  function buildControl(c, parent) {
-    const row = document.createElement('div');
-    row.className = 'ctl';
-    const id = 'c_' + c.k;
-    const label = document.createElement('label');
-    label.htmlFor = id;
-    label.textContent = c.l;
-    label.title = 'Double-click to reset';
-    const out = document.createElement('output');
-    out.htmlFor = id;
-    let input;
-    if (c.opts) {
-      input = document.createElement('select');
-      c.opts.forEach((o) => {
-        const op = document.createElement('option');
-        op.value = String(o.v); op.textContent = o.l;
-        input.append(op);
-      });
-      input.onchange = () => setParam(c.k, +input.value);
-    } else {
-      input = document.createElement('input');
-      input.type = 'range';
-      input.min = c.min; input.max = c.max; input.step = c.step;
-      input.oninput = () => setParam(c.k, +input.value);
-      input.ondblclick = () => setParam(c.k, DEFAULTS[c.k]);
-    }
-    input.id = id;
-    label.ondblclick = () => setParam(c.k, DEFAULTS[c.k]);
-    row.append(label, out, input);
-    parent.append(row);
-    rows.set(c.k, { c, row, input, out });
-  }
-
-  function paintRow(k) {
-    const r = rows.get(k);
-    if (!r) return;
-    const v = state.params[k];
-    if (r.c.opts) r.input.value = String(v);
-    else {
-      r.input.value = v;
-      r.input.style.setProperty('--pct', ((v - r.c.min) / (r.c.max - r.c.min)) * 100 + '%');
-    }
-    r.out.textContent = fmtVal(r.c, v);
-    r.row.classList.toggle('changed', Math.abs(v - DEFAULTS[k]) > 1e-6);
-  }
-
-  function setParam(k, v) {
-    state.params[k] = v;
-    paintRow(k);
-    if (state.look) { state.look = null; paintLooks(); }
-    paintModules();
-    persist();
-  }
-
-  MASTER.forEach((c) => buildControl(c, $('masterSec')));
-
-  const mods = new Map();
-  const CHEV = '<span class="mod-chev" aria-hidden="true"></span>';
-  GROUPS.forEach((g, i) => {
-    const d = document.createElement('details');
-    d.className = 'mod';
-    d.open = i < 2 || g.id === 'screen';
-    const s = document.createElement('summary');
-    s.innerHTML = CHEV + '<span class="mod-led" aria-hidden="true"></span><span class="mod-title"></span>';
-    s.querySelector('.mod-title').textContent = g.title;
-    const power = document.createElement('button');
-    power.type = 'button'; power.className = 'mini'; power.textContent = 'on';
-    power.title = 'Switch this module on or off';
-    power.onclick = (e) => {
-      e.preventDefault(); e.stopPropagation();
-      state.enabled[g.id] = !state.enabled[g.id];
-      paintModules(); persist();
-    };
-    const reset = document.createElement('button');
-    reset.type = 'button'; reset.className = 'mini'; reset.textContent = 'reset';
-    reset.title = 'Return this module to its defaults';
-    reset.onclick = (e) => {
-      e.preventDefault(); e.stopPropagation();
-      g.controls.forEach((c) => { state.params[c.k] = DEFAULTS[c.k]; paintRow(c.k); });
-      state.look = null; paintLooks(); paintModules(); persist();
-    };
-    s.append(power, reset);
-    const body = document.createElement('div');
-    body.className = 'mod-body';
-    const hint = document.createElement('p');
-    hint.className = 'mod-hint'; hint.textContent = g.hint;
-    body.append(hint);
-    g.controls.forEach((c) => buildControl(c, body));
-    d.append(s, body);
-    $('modules').append(d);
-    mods.set(g.id, { g, d, power });
-  });
-
-  function paintModules() {
-    for (const { g, d, power } of mods.values()) {
-      const on = state.enabled[g.id];
-      const active = g.controls.some((c) => c.n !== undefined && Math.abs(state.params[c.k] - c.n) > 1e-6);
-      d.classList.toggle('on', on && active);
-      d.classList.toggle('off', !on);
-      power.textContent = on ? 'on' : 'off';
-      power.setAttribute('aria-pressed', String(on));
-    }
-  }
-  const paintAll = () => { rows.forEach((_, k) => paintRow(k)); paintModules(); paintLooks(); };
-
-  // ------------------------------------------------------------ looks
-  let cat = 'Terminal';
-  const CATS = ['Terminal', 'Camera', 'TV', 'Glitch', 'Mine'];
-  const mine = () => store('atlas.looks') || [];
-  CATS.forEach((name) => {
-    const b = document.createElement('button');
-    b.type = 'button'; b.setAttribute('role', 'tab'); b.textContent = name.toLowerCase(); b.dataset.cat = name;
-    b.onclick = () => { cat = name; paintLooks(); };
-    $('catTabs').append(b);
-  });
-
-  function applyLook(look) {
-    state.params = { ...DEFAULTS, ...look.p };
-    state.enabled = Object.fromEntries(GROUPS.map((g) => [g.id, look.enabled ? look.enabled[g.id] !== false : true]));
-    state.look = look.name;
-    paintAll(); persist();
-  }
-  K.applyLook = applyLook;
-
-  function paintLooks() {
-    [...$('catTabs').children].forEach((b) => b.setAttribute('aria-selected', String(b.dataset.cat === cat)));
-    const grid = $('presetGrid');
-    grid.innerHTML = '';
-    const list = cat === 'Mine' ? mine() : PRESETS.filter((p) => p.cat === cat);
-    if (!list.length) {
-      const p = document.createElement('p');
-      p.className = 'empty-note';
-      p.textContent = 'Looks you save appear here. They keep settings only, in this browser.';
-      grid.append(p);
-    }
-    list.forEach((look) => {
-      const b = document.createElement('button');
-      b.type = 'button'; b.className = 'preset';
-      b.setAttribute('aria-pressed', String(state.look === look.name));
-      const span = document.createElement('span');
-      span.textContent = look.name;
-      b.append(span);
-      b.onclick = () => applyLook(look);
-      if (cat === 'Mine') {
-        const x = document.createElement('span');
-        x.className = 'x'; x.textContent = '×'; x.title = 'Delete this look';
-        x.onclick = (e) => {
-          e.stopPropagation();
-          store('atlas.looks', mine().filter((m) => m.name !== look.name));
-          paintLooks();
-        };
-        b.append(x);
-      }
-      grid.append(b);
-    });
-  }
-
-  $('savePreset').onclick = () => {
-    const name = $('presetName').value.trim();
-    if (!name) { $('presetName').focus(); toast('Type a name for the look first.'); return; }
-    const list = mine().filter((m) => m.name !== name);
-    list.push({ name, p: { ...state.params }, enabled: { ...state.enabled } });
-    if (store('atlas.looks', list) === null && !mine().length) { toast('This browser blocked saving. Looks cannot be kept here.'); return; }
-    $('presetName').value = '';
-    state.look = name; cat = 'Mine';
-    paintLooks();
-    toast('Saved "' + name + '"');
-  };
-  $('presetName').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('savePreset').click(); });
-
-  $('randomBtn').onclick = () => {
-    const p = { ...DEFAULTS };
-    GROUPS.forEach((g) => g.controls.forEach((c) => {
-      if (c.opts) { if (Math.random() < 0.25) p[c.k] = c.opts[Math.floor(Math.random() * c.opts.length)].v; return; }
-      if (c.n !== undefined && Math.random() > 0.3) return;
-      const span = c.max - c.min;
-      const v = c.n !== undefined ? c.min + span * Math.pow(Math.random(), 1.6) : c.min + span * Math.random();
-      p[c.k] = Math.round(v / c.step) * c.step;
-    }));
-    p.capture = Math.random() < 0.25 ? p.capture : 0;
-    applyLook({ name: null, p });
-  };
-  $('resetBtn').onclick = () => applyLook({ name: null, p: {} });
-
-  // ------------------------------------------------------------ persistence (this browser only)
-  function persist() {
-    clearTimeout(persist.t);
-    persist.t = setTimeout(() => store('atlas.session.v2', { params: state.params, enabled: state.enabled, look: state.look }), 300);
-  }
-  const saved = store('atlas.session.v2');
-  if (saved && saved.params) {
-    state.params = { ...DEFAULTS, ...saved.params };
-    Object.assign(state.enabled, saved.enabled || {});
-    state.look = saved.look || null;
-  } else {
-    applyLook(PRESETS.find((p) => p.name === 'Terminal Glow'));
-  }
-  const q = store('atlas.quality');
-  if (q && q !== 'SD') document.querySelector(`#quality button[data-q="${q}"]`)?.click();
-  const o = store('atlas.out');
-  if (o) { state.out = o; $('outSize').value = o; }
-
-  paintAll();
   syncTransport();
   loadSample();
   window.addEventListener('resize', fitView);

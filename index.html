@@ -60,7 +60,7 @@ button, select, input { font: inherit; color: inherit; }
 .top {
   display: flex; align-items: center; gap: 8px 18px; flex-wrap: wrap;
   padding-bottom: 12px; border-bottom: var(--border-rule);
-  text-shadow: var(--shadow-win-text); animation: flicker 6s infinite;
+  text-shadow: var(--shadow-win-text);
 }
 .brand { display: flex; align-items: baseline; gap: 14px; margin-right: auto; min-width: 0; }
 .who { color: var(--g-dim); }
@@ -103,7 +103,6 @@ select.sel, .ctl select {
 .bar > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar > span:last-child { flex: none; max-width: 60%; font-variant-numeric: tabular-nums; }
 /* scanlines and vignette on the control window; the preview stays clean so you judge the real output */
-.crt { animation: flicker 6s infinite; }
 .crt::after {
   content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 3;
   background:
@@ -154,7 +153,7 @@ select.sel, .ctl select {
 .timecode { color: var(--g-dim); font-variant-numeric: tabular-nums; min-width: 8ch; }
 
 /* control window */
-.rack { grid-template-rows: auto 1fr; }
+.rack { grid-template-rows: auto auto 1fr; }
 .rack-scroll { min-height: 0; overflow-y: auto; padding-bottom: 24px; }
 .rack-sec { padding: 14px; border-bottom: var(--border-rule); display: grid; gap: 10px; }
 .cmd-line { margin: 0; }
@@ -225,6 +224,34 @@ details[open] .mod-chev::before { content: "[-]"; }
 .fatal { max-width: 640px; margin: 10vh auto; padding: 0 16px; }
 .fatal h2 { font-weight: 400; font-size: 46px; line-height: .95; text-shadow: var(--shadow-display-text); }
 
+/* rack tabs, render row */
+.rack-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: var(--border-rule); }
+.rack-tabs button { min-height: 44px; border: 0; background: transparent; color: var(--g-dim); cursor: pointer; text-shadow: inherit; }
+.rack-tabs button + button { border-left: var(--border-rule); }
+.rack-tabs button:hover { color: var(--g); }
+.rack-tabs button[aria-selected="true"] { color: var(--g); box-shadow: inset 0 -2px 0 var(--g); }
+.render-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* automation */
+.ctl { grid-template-columns: 1fr auto auto; }
+.ctl input[type=range], .ctl select, .ctl .track, .ctl .auto-panel { grid-column: 1 / -1; }
+.ctl select { grid-column: 1 / -1; }
+.ctl > select { grid-row: 2; }
+.auto-btn { min-width: 28px; min-height: 28px; padding: 0 4px; border: 1px solid transparent; background: transparent; color: var(--g-dim); cursor: pointer; text-shadow: inherit; }
+.auto-btn:hover { border-color: var(--g-dim); color: var(--g); }
+.auto-btn[aria-pressed="true"] { background: var(--g); color: var(--ink-on-g); text-shadow: none; }
+.track { position: relative; }
+.modmark { position: absolute; top: 50%; width: 3px; height: 14px; margin-left: -1px; transform: translateY(-50%); background: var(--g); box-shadow: 0 0 8px var(--glow-80); pointer-events: none; opacity: .75; }
+.auto-panel { display: grid; gap: 4px; padding: 6px 0 2px 10px; border-left: var(--border-rule); margin-top: 2px; }
+.auto-row { display: grid; grid-template-columns: 6ch 1fr auto; align-items: center; gap: 8px; }
+.auto-row select { min-height: 32px; grid-column: 2 / -1; }
+.auto-row input[type=range] { grid-column: auto; }
+.auto-row output { color: var(--g-dim); font-variant-numeric: tabular-nums; min-width: 6ch; text-align: right; }
+.auto-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.auto-list li { display: flex; align-items: center; gap: 6px; }
+.auto-list li::before { content: "~"; color: var(--g-dim); }
+.auto-list li .dim { margin-right: auto; }
+
 @keyframes blink { 50% { opacity: 0; } }
 @keyframes flicker { 0%, 100% { opacity: 1; } 50% { opacity: .96; } 52% { opacity: .9; } 54% { opacity: 1; } }
 
@@ -251,19 +278,6 @@ details[open] .mod-chev::before { content: "[-]"; }
     <div class="tools">
       <button class="btn" id="openBtn" type="button">$ open photo/video</button>
       <input type="file" id="file" accept="image/*,video/*" hidden>
-      <span class="field-label" id="qLabel">raster</span>
-      <div class="seg" id="quality" role="group" aria-labelledby="qLabel">
-        <button type="button" data-q="SD" aria-pressed="true" title="240 lines: classic chunky tube">SD</button>
-        <button type="button" data-q="HI" aria-pressed="false" title="480 lines: finer signal">HI</button>
-        <button type="button" data-q="FULL" aria-pressed="false" title="Process at source resolution">FULL</button>
-      </div>
-      <label class="field-label" for="outSize">out</label>
-      <select class="sel" id="outSize">
-        <option value="720">720p</option>
-        <option value="1080" selected>1080p</option>
-        <option value="1440">1440p</option>
-        <option value="source">source</option>
-      </select>
       <button class="btn" id="stillBtn" type="button">$ save still</button>
       <button class="btn primary" id="recBtn" type="button">$ export video</button>
     </div>
@@ -300,25 +314,66 @@ details[open] .mod-chev::before { content: "[-]"; }
     </section>
 
     <aside class="win rack crt" id="rack" aria-label="Controls">
-      <div class="bar"><span>controls · atlas</span><span>9 modules</span></div>
+      <div class="bar"><span>controls · atlas</span><span id="rackState"></span></div>
+      <div class="rack-tabs" role="tablist">
+        <button type="button" role="tab" id="tab-looks" aria-selected="true">looks</button>
+        <button type="button" role="tab" id="tab-adjust" aria-selected="false">adjust</button>
+      </div>
       <div class="rack-scroll">
-        <section class="rack-sec">
-          <p class="cmd-line">ls looks/</p>
-          <div class="tabs" role="tablist" id="catTabs"></div>
-          <div class="preset-grid" id="presetGrid"></div>
-          <div class="row">
-            <input id="presetName" type="text" placeholder="name this look" maxlength="40" aria-label="Look name">
-            <button class="btn" id="savePreset" type="button">$ save</button>
-          </div>
-          <div class="row">
-            <button class="btn" id="randomBtn" type="button">$ randomize</button>
-            <button class="btn" id="resetBtn" type="button">$ reset --all</button>
-          </div>
-        </section>
-        <section class="rack-sec" id="masterSec">
-          <p class="cmd-line">master</p>
-        </section>
-        <div id="modules"></div>
+        <div id="pane-looks">
+          <section class="rack-sec">
+            <p class="cmd-line">ls looks/</p>
+            <div class="tabs" role="tablist" id="catTabs"></div>
+            <div class="preset-grid" id="presetGrid"></div>
+            <div class="row">
+              <button class="btn" id="randomBtn" type="button">$ randomize</button>
+              <button class="btn" id="resetBtn" type="button">$ reset --all</button>
+            </div>
+          </section>
+          <section class="rack-sec" id="quickSec">
+            <p class="cmd-line">quick</p>
+            <p class="mod-hint">Each macro scales a family of controls in the current look. 1.00 leaves it as set.</p>
+          </section>
+          <section class="rack-sec">
+            <p class="cmd-line">render</p>
+            <div class="render-row">
+              <span class="field-label" id="qLabel">raster</span>
+              <div class="seg" id="quality" role="group" aria-labelledby="qLabel">
+                <button type="button" data-q="LO" aria-pressed="false" title="120 lines: the chunkiest tube">LO</button>
+                <button type="button" data-q="SD" aria-pressed="true" title="240 lines: classic tube">SD</button>
+                <button type="button" data-q="HI" aria-pressed="false" title="480 lines: finer signal">HI</button>
+                <button type="button" data-q="FULL" aria-pressed="false" title="Process at source resolution">FULL</button>
+              </div>
+            </div>
+            <div class="render-row">
+              <label class="field-label" for="outSize">out</label>
+              <select class="sel" id="outSize">
+                <option value="720">720p</option>
+                <option value="1080" selected>1080p</option>
+                <option value="1440">1440p</option>
+                <option value="source">source</option>
+              </select>
+            </div>
+          </section>
+          <section class="rack-sec">
+            <p class="cmd-line">save look</p>
+            <div class="row">
+              <input id="presetName" type="text" placeholder="name this look" maxlength="40" aria-label="Look name">
+              <button class="btn" id="savePreset" type="button">$ save</button>
+            </div>
+          </section>
+        </div>
+        <div id="pane-adjust" hidden>
+          <section class="rack-sec">
+            <p class="cmd-line">automation</p>
+            <p class="mod-hint" id="autoEmpty">Click ~ next to any slider to automate it. It then swings around its set value as the clip plays, and exports with it.</p>
+            <ul class="auto-list" id="autoList"></ul>
+          </section>
+          <section class="rack-sec" id="masterSec">
+            <p class="cmd-line">master</p>
+          </section>
+          <div id="modules"></div>
+        </div>
       </div>
     </aside>
   </main>
@@ -326,9 +381,11 @@ details[open] .mod-chev::before { content: "[-]"; }
 <div class="toast" id="toast" hidden></div>
 
 <script src="src/shaders.js"></script>
+<script src="src/screen-shader.js"></script>
 <script src="src/engine.js"></script>
 <script src="src/params.js"></script>
 <script src="src/app.js"></script>
+<script src="src/rack.js"></script>
 <script src="src/export.js"></script>
 </body>
 </html>
