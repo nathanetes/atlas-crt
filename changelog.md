@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v2.2.1-beta
+
+Moiré rebuilt on real camera physics, down to single-pixel scale, plus grading before and after the tube.
+
+Try it at https://atlas-crt.nathanetes.com
 
 ### Added
 
@@ -17,7 +21,14 @@
 - **The picture stays sharp at every Moiré Scale.** The sensor photographs only the fine structure (the grid and the raster lines), and that photo multiplies the picture. The grid's cells are also drawn sharp at full resolution, since a sensor at two photosites per triad records the fringes but not the cells themselves.
 - **Phone-camera sensor.** Photosites gather light from 40% of their width, with no anti-aliasing filter, so detail finer than the sensor aliases into strong fringes instead of averaging away. Raster lines beat against the sensor rows too, adding horizontal streaks when Scanlines is on.
 - **Moiré Density** reaches much tighter fringes, from broad bands to streaks a few cells apart. Moiré Angle defaults to 0.
+- **The preview matches the export.** The camera always shoots at export resolution, so the fitted preview shows the same moiré scaled down, instead of finer aliased stripes.
 - Phone Off Screen, Rainbow Grille and Filmed Off TV photograph the Screen's own mask again (Moiré Grid: Same as Screen), as in v2.0.0-beta, and their dark areas now show moiré too.
+
+### Known limitations
+
+- **Saved looks that use moiré will look different**, because the moiré controls changed. Looks that set Brightness or Contrast keep their values; those controls now live in Post Grade.
+- **Moiré adds two render passes** while Rainbow Moiré or Moiré Bands is above zero, so long or 4K exports are slower with it on.
+- **In the fitted preview,** single-pixel moiré is drawn smaller than in the export. Use the 100% view (Z) to see exactly what you'll export.
 
 ## v2.0.0-beta
 
