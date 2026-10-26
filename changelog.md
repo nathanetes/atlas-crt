@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v2.2.2-beta
+
+Atlas CRT now opens with its own title intro.
+
+Try it at https://atlas-crt.nathanetes.com
 
 ### Added
 
