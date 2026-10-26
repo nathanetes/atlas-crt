@@ -1,5 +1,6 @@
-// Atlas CRT shader sources. Four programs: signal (the damaged video signal at the
-// tube's raster), copy + blur (glow pyramids), and screen (the filmed tube itself).
+// Atlas CRT shader sources, part 1: shared helpers, the datamosh pass, the signal
+// pass (the damaged video signal at the tube's raster), and the glow passes.
+// The screen pass lives in screen-shader.js.
 (function () {
   const VERT = `#version 300 es
 out vec2 vUv;
@@ -24,23 +25,62 @@ float vnoise(vec2 p) {
 float vnoise1(float x) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(hash11(i), hash11(i + 1.0), f); }
 float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
+vec3 hue2rgb(float h) { return clamp(abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0); }
+vec3 triad(float x) { vec3 c = 0.5 + 0.5 * cos(6.2831853 * (x - vec3(0.0, 0.33333, 0.66667))); return c * c; }
+const mat3 RGB2YIQ = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
+const mat3 YIQ2RGB = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);
 `;
+
+  // ---------------------------------------------------------------- datamosh
+  // Codec-style P-frame smearing: each block either refreshes from the new frame
+  // or drags the previous moshed frame along a rough motion vector.
+  const MOSH = COMMON + `
+uniform sampler2D uCur, uPrev, uMosh;
+uniform vec2 uRes;
+uniform float uTime, uFrame;
+uniform float u_mosh, u_moshBlock, u_moshGain, u_moshDrift, u_moshRefresh, u_moshResid;
+
+float Y(sampler2D s, vec2 p, float lod) { return lum(textureLod(s, p, lod).rgb); }
+
+void main() {
+  float bs = floor(mix(4.0, 32.0, u_moshBlock));
+  vec2 px = 1.0 / uRes;
+  vec2 blk = floor(vUv * uRes / bs);
+  vec2 c = (blk + 0.5) * bs * px;
+  float lod = log2(bs);
+
+  // one Lucas-Kanade step on the blurred luma at the block centre
+  vec2 dx = vec2(bs * px.x, 0.0), dy = vec2(0.0, bs * px.y);
+  vec2 grad = vec2(Y(uCur, c + dx, lod) - Y(uCur, c - dx, lod), Y(uCur, c + dy, lod) - Y(uCur, c - dy, lod)) / (2.0 * bs);
+  float it = Y(uCur, c, lod) - Y(uPrev, c, lod);
+  vec2 v = -it * grad / (dot(grad, grad) + 2e-4);
+  if (length(v) > bs * 1.5) v = normalize(v) * bs * 1.5;
+  v += u_moshDrift * bs * 0.6 * (vec2(vnoise(blk * 0.35 + uTime * 0.4), vnoise(blk * 0.35 + 17.0 - uTime * 0.3)) - 0.5) * 2.0;
+
+  vec3 cur = texture(uCur, vUv).rgb;
+  vec4 held = texture(uMosh, vUv - v * u_moshGain * px);
+  vec3 moshed = held.rgb + (cur - texture(uPrev, vUv).rgb) * u_moshResid;
+
+  float tick = floor(uTime * 8.0);
+  float key = step(hash12(blk * 1.31 + tick * 0.77), u_moshRefresh * 0.12);
+  if (held.a < 0.5) key = 1.0;
+  float pBlock = step(hash12(blk * 1.7 + floor(uTime * 0.5)), u_mosh);
+  o = vec4(mix(cur, mix(moshed, cur, key), pBlock), 1.0);
+}`;
 
   // ---------------------------------------------------------------- signal
   const SIGNAL = COMMON + `
 uniform sampler2D uSrc;
 uniform sampler2D uPrev;
-uniform vec2 uRes;
+uniform vec2 uRes, uSrcRes;
 uniform float uTime, uFrame;
 uniform float u_gain, u_chroma, u_hueDrift, u_bleed, u_rgbSplit, u_sharpen;
 uniform float u_bend, u_bendMotion, u_bendFreq, u_bendQ, u_bendBoost, u_bendLo, u_bendHi, u_bendFb, u_bendDelay;
 uniform float u_shake, u_tear, u_roll, u_flash, u_dropout, u_dropStyle, u_hum, u_echo, u_headSwitch, u_topLine;
 uniform float u_rf, u_speckSize, u_grain;
 uniform float u_waves, u_waveCount, u_waveReact, u_waveSmooth, u_waveOrient, u_waveColor, u_waveDir, u_waveBlend;
+uniform float u_blockGlitch, u_slices, u_smear, u_smearThresh, u_compress;
 uniform float u_persistence;
-
-const mat3 RGB2YIQ = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
-const mat3 YIQ2RGB = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);
 
 vec3 src(vec2 uv) { return texture(uSrc, uv).rgb; }
 float srcY(vec2 uv) { return lum(texture(uSrc, uv).rgb); }
@@ -75,6 +115,11 @@ void main() {
     if (d > 0.0 && d < 1.0) dx += u_tear * 0.2 * d * d * (0.6 + 0.4 * sin(t * 9.0 + line * 0.05));
     dx += u_tear * 0.04 * step(0.975, hash12(vec2(line * 0.3, floor(t * 20.0))));
   }
+  if (u_slices > 0.001) {
+    float bucket = floor(t * 6.0);
+    float band = floor(yT * (6.0 + floor(hash11(bucket * 0.37) * 30.0)));
+    if (hash12(vec2(band, bucket)) < u_slices * 0.6) dx += (hash12(vec2(band + 3.1, bucket)) - 0.5) * 0.35 * u_slices;
+  }
   float hs = smoothstep(0.95, 0.99, yT);
   if (u_headSwitch > 0.001) dx += u_headSwitch * hs * (0.04 + 0.05 * (hash12(vec2(line, fr)) - 0.5));
 
@@ -88,11 +133,43 @@ void main() {
   vec2 suv = vec2(uv.x + dx, 1.0 - yT);
   if (style == 2 && seg > 0.0) suv.y += (1.0 + floor(hash12(vec2(line, fr)) * 4.0)) / lines;
 
-  // composite decode: split, chroma bleed, sharpening
+  // macroblock glitches: blocks jump, swap channels or posterize
+  float glitch = 0.0;
+  if (u_blockGlitch > 0.001) {
+    vec2 bid = floor(vec2(uv.x * uRes.x, yT * lines) / 16.0);
+    float bucket = floor(t * 10.0);
+    if (hash12(bid + bucket * 7.13) < u_blockGlitch * 0.18) {
+      glitch = 1.0 + floor(hash12(bid * 1.9 + bucket) * 3.0);
+      suv += (vec2(hash12(bid + bucket), hash12(bid.yx + bucket * 1.3)) - 0.5) * vec2(0.25, 0.15) * u_blockGlitch;
+    }
+  }
+
+  // composite decode: split, compression, smear, chroma bleed, sharpening
   float sd = u_rgbSplit * 0.008;
   vec3 rgb = vec3(texture(uSrc, suv + vec2(sd, 0.0)).r, texture(uSrc, suv).g, texture(uSrc, suv - vec2(sd, 0.0)).b);
-  vec3 yiq = RGB2YIQ * rgb;
 
+  if (u_compress > 0.001) {
+    float bs = 8.0 * uSrcRes.x / uRes.x;
+    vec2 bc = (floor(suv * uSrcRes / bs) + 0.5) * bs / uSrcRes;
+    vec3 avg = textureLod(uSrc, bc, log2(bs)).rgb;
+    float lv = mix(32.0, 6.0, u_compress);
+    rgb = mix(rgb, mix(avg, floor(rgb * lv + 0.5) / lv, 0.35), u_compress);
+  }
+  if (u_smear > 0.001) {
+    float len = u_smear * 0.3, bl = lum(rgb);
+    vec3 best = rgb;
+    for (int i = 1; i <= 24; i++) {
+      float fi = float(i) / 24.0;
+      vec3 s = texture(uSrc, suv - vec2(fi * len, 0.0)).rgb;
+      float ls = lum(s);
+      if (ls > u_smearThresh && ls > bl) { best = s * (1.0 - fi * 0.35); bl = ls; }
+    }
+    rgb = best;
+  }
+  if (glitch > 1.5 && glitch < 2.5) rgb = rgb.brg;
+  else if (glitch > 2.5) rgb = floor(rgb * 3.0 + 0.5) / 3.0;
+
+  vec3 yiq = RGB2YIQ * rgb;
   if (u_bleed > 0.001) {
     vec2 iq = vec2(0.0);
     float ws = 0.0;
@@ -215,182 +292,5 @@ void main() {
   o = vec4(c, 1.0);
 }`;
 
-  // ---------------------------------------------------------------- screen
-  const SCREEN = COMMON + `
-uniform sampler2D uSig, uBlurA, uBlurB, uSrc;
-uniform vec2 uOut, uSigRes;
-uniform float uTime, uFrame, uAspect, uSplit, uScale;
-uniform float u_mix, u_bright, u_contrast, u_postGlow, u_halation;
-uniform float u_maskType, u_maskScale, u_phosphor, u_scanlines, u_refresh, u_persistence;
-uniform float u_sync, u_ripple, u_flicker, u_softness, u_pbloom, u_overscan;
-uniform float u_capture, u_shutter, u_pulseContrast, u_bandAngle, u_readout, u_moire, u_rainbow;
-uniform float u_conv, u_convAngle, u_pconv;
-uniform float u_glow, u_spectral, u_curve, u_stretch, u_fisheye, u_outside, u_extend, u_vignette, u_tint;
-
-vec3 sigLine(float l, float x) {
-  l = clamp(l, 0.0, uSigRes.y - 1.0);
-  return textureLod(uSig, vec2(x, (l + 0.5) / uSigRes.y), 0.0).rgb;
-}
-// one scanline's beam: brighter lines draw wider, normalised so average light holds
-vec3 beamW(vec3 c, float d) {
-  vec3 s = (0.2 + 0.12 * clamp(c, 0.0, 1.5) * (0.5 + u_pbloom)) * (1.0 + u_softness);
-  return c * exp(-d * d / (2.0 * s * s)) / (s * 2.5066);
-}
-vec3 beam(vec2 uv) {
-  float yl = uv.y * uSigRes.y - 0.5;
-  float l0 = floor(yl), f = yl - l0;
-  vec3 c0 = sigLine(l0, uv.x), c1 = sigLine(l0 + 1.0, uv.x);
-  vec3 lin = mix(c0, c1, f);
-  float amt = u_scanlines * smoothstep(2.0, 3.5, uOut.y / uSigRes.y);
-  if (amt < 0.001) return lin;
-  vec3 sc = beamW(sigLine(l0 - 1.0, uv.x), f + 1.0) + beamW(c0, f) + beamW(c1, 1.0 - f) + beamW(sigLine(l0 + 2.0, uv.x), 2.0 - f);
-  return mix(lin, sc, amt);
-}
-
-// sub-stripe width in canvas pixels; uScale shrinks it for the fitted preview
-float maskPitch(int type) {
-  return (type == 3 ? mix(0.67, 1.6, u_maskScale) : mix(1.0, 4.0, u_maskScale)) * uScale;
-}
-vec3 triad(float x) { vec3 c = 0.5 + 0.5 * cos(6.2831853 * (x - vec3(0.0, 0.33333, 0.66667))); return c * c; }
-vec3 maskAt(vec2 fc) {
-  int type = int(u_maskType + 0.5);
-  float u = maskPitch(type);
-  if (type == 1) return triad(fc.x / (3.0 * u)) * 2.4;            // aperture grille
-  if (type == 0 || type == 3) {                                     // slot mask / fine slot
-    float col = floor(fc.x / (3.0 * u));
-    float y = fract(fc.y / (3.45 * u) + mod(col, 2.0) * 0.5);
-    float gap = smoothstep(0.7, 0.8, y) * (1.0 - smoothstep(0.92, 1.0, y));
-    return triad(fc.x / (3.0 * u)) * (1.0 - 0.85 * gap) * 2.7;
-  }
-  if (type == 2) {                                                  // delta dot shadow mask
-    vec2 g = fc / (u * 2.0);
-    float row = floor(g.y);
-    g.x += mod(row, 2.0) * 0.5;
-    vec2 id = floor(g);
-    float d = length((fract(g) - 0.5) * vec2(1.0, 1.15));
-    float ch = mod(id.x + 2.0 * row, 3.0);
-    vec3 m = vec3(float(ch < 0.5), float(ch > 0.5 && ch < 1.5), float(ch > 1.5));
-    return m * (1.0 - smoothstep(0.32, 0.5, d)) * 4.8;
-  }
-  vec2 f = fract(fc / (3.0 * u));                                    // square grid
-  float rowLit = smoothstep(0.0, 0.15, f.y) * (1.0 - smoothstep(0.85, 1.0, f.y));
-  return triad(fc.x / (3.0 * u)) * rowLit * 3.0;
-}
-
-void main() {
-  vec2 uv = vUv;
-  float t = uTime;
-  vec2 p = uv * 2.0 - 1.0;
-
-  // deflection: sync wander, supply ripple, overscan, glass and lens
-  float slip = step(0.985, hash11(floor(t * 8.0))) * (hash11(floor(t * 8.0) + 3.0) - 0.5);
-  p.y += u_sync * (0.012 * (vnoise1(t * 2.3) - 0.5) + 0.08 * slip);
-  p.x += u_ripple * 0.006 * sin(6.2831853 * (uv.y * 2.0 - t * 0.5));
-  p *= 1.0 - u_overscan * 0.18;
-  vec2 ph = p * vec2(uAspect, 1.0);
-  float r2 = dot(ph, ph) / (uAspect * uAspect + 1.0);
-  p *= 1.0 + (u_curve * 0.3 + u_fisheye * 0.22) * r2;
-  p.y += u_stretch * 0.1 * (1.0 - p.y * p.y);
-  vec2 suv = p * 0.5 + 0.5;
-
-  float inside = 1.0;
-  if (u_extend > 0.5) {
-    suv = clamp(suv, 0.0, 1.0);
-  } else {
-    float rad = u_curve * 0.12;
-    vec2 q = abs(suv - 0.5) * 2.0 * vec2(uAspect, 1.0) - vec2(uAspect, 1.0) + rad;
-    float sdf = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
-    float px = 2.0 / uOut.y;
-    inside = 1.0 - smoothstep(-px, px, sdf);
-  }
-
-  // beams with convergence error
-  vec3 col;
-  if (u_conv > 0.001) {
-    float a = radians(u_convAngle);
-    vec2 coff = (p * 0.006 + vec2(cos(a), sin(a)) * 0.004) * u_conv;
-    col = vec3(beam(suv + coff).r, beam(suv).g, beam(suv - coff).b);
-  } else {
-    col = beam(suv);
-  }
-
-  // phosphor mask, drawn on the glass so it follows the curve
-  if (u_phosphor > 0.001) {
-    vec2 mfc = suv * uOut;
-    vec3 m;
-    if (u_pconv > 0.001) {
-      float sh = u_pconv * 1.5 * maskPitch(int(u_maskType + 0.5));
-      m = vec3(maskAt(mfc + vec2(sh, 0.0)).r, maskAt(mfc).g, maskAt(mfc - vec2(sh, 0.0)).b);
-    } else {
-      m = maskAt(mfc);
-    }
-    // a mask finer than the canvas can show is drawn as its average instead of aliasing
-    m = mix(vec3(0.92), m, smoothstep(0.55, 1.2, maskPitch(int(u_maskType + 0.5))));
-    m = mix(m, vec3(1.0), clamp((lum(col) - 0.55) * 1.5, 0.0, 1.0) * u_pbloom);
-    col *= mix(vec3(1.0), m, u_phosphor);
-  }
-
-  // light spreading in the signal path and the glass
-  vec3 bA = texture(uBlurA, suv).rgb;
-  vec3 bB = texture(uBlurB, suv).rgb;
-  // bloom from highlights plus a faint veil, so mid-tones keep their scanline gaps
-  col += (max(bA - 0.25, 0.0) * 1.1 + bA * 0.1) * u_postGlow;
-  col += (max(bB - 0.3, 0.0) * 1.5 + bB * 0.15) * u_glow;
-  if (u_spectral > 0.001) {
-    vec2 so = p * 0.02 * u_spectral;
-    vec3 sb = vec3(texture(uBlurA, suv + so).r, bA.g, texture(uBlurA, suv - so).b);
-    col += max(sb - 0.25, 0.0) * u_spectral * 1.6 * vec3(1.0, 0.9, 1.2);
-  }
-  if (u_halation > 0.001) col += bB * vec3(1.0, 0.32, 0.14) * smoothstep(0.35, 1.0, lum(bB)) * u_halation * 1.8;
-
-  // camera filming the tube: scan pulse against the shutter
-  if (u_capture > 0.001) {
-    float yT = 1.0 - suv.y;
-    float ys = yT + tan(radians(clamp(u_bandAngle, -85.0, 85.0))) * (suv.x - 0.5) * uAspect * 0.5;
-    ys = u_readout > 1.0 ? (1.0 - ys) * u_readout : ys * (1.0 + u_readout * 0.6);
-    float beat = u_refresh - 30.0 * floor(u_refresh / 30.0 + 0.5);
-    float pos = fract(t * (beat * 0.6 + 0.12));
-    float expo = clamp(u_refresh / u_shutter, 0.02, 4.0);
-    float d = fract(pos - ys);
-    float tau = 0.015 + u_persistence * 0.5;
-    float fe = fract(expo);
-    float lit = 1.0 - smoothstep(fe - 0.015, fe + 0.015, d);
-    float pulse;
-    if (expo < 1.0) {
-      float tail = exp(-max(d - fe, 0.0) / tau);
-      pulse = max(lit, tail) / pow(fe + tau * (1.0 - exp(-(1.0 - fe) / tau)), 0.7);
-    } else {
-      pulse = (floor(expo) + lit) / expo;
-    }
-    col *= mix(1.0, pulse, clamp(u_capture * u_pulseContrast * 0.6, 0.0, 1.2));
-  }
-  if (u_moire + u_rainbow > 0.001) {
-    vec2 q = suv * vec2(uAspect, 1.0) * 1000.0;
-    float mph = 6.2831853 * (q.x * 0.011 + q.y * 0.0037 + 0.35 * sin(q.y * 0.006 + t * 0.4)) * (1.0 + 2.5 * r2 * (0.3 + u_curve));
-    col *= mix(1.0, 0.45 + 1.1 * (0.5 + 0.5 * cos(mph + t * 0.8)), u_moire * 0.8);
-    vec3 rb = 0.5 + 0.5 * cos(mph * 0.6 + t * 0.5 + vec3(0.0, 2.094, 4.189));
-    col *= mix(vec3(1.0), 0.45 + 1.1 * rb, u_rainbow * 0.75);
-  }
-  col *= 1.0 - u_flicker * (0.1 * hash11(uFrame * 0.61 + 0.3) + 0.05 * sin(t * 47.0));
-  col *= 1.0 - u_vignette * 0.55 * smoothstep(0.3, 1.0, r2);
-
-  // grade, soft shoulder, dry/wet, outside the tube
-  col = max((col - 0.5) * u_contrast + 0.5 + u_bright, 0.0);
-  col = mix(col, 0.8 + 0.2 * tanh((col - 0.8) / 0.2), step(0.8, col));
-
-  // monochrome tubes: one phosphor, whose hottest cores burn toward white
-  int tint = int(u_tint + 0.5);
-  if (tint > 0) {
-    vec3 ph = tint == 1 ? vec3(0.239, 1.0, 0.447) : tint == 2 ? vec3(1.0, 0.69, 0.18) : vec3(0.93, 0.96, 1.0);
-    float l = lum(col);
-    col = ph * l + max(l - 0.75, 0.0) * 0.8 * (vec3(1.0) - ph);
-  }
-  vec3 dry = texture(uSrc, uv).rgb;
-  float a = u_outside > 0.5 ? mix(1.0, inside, u_mix) : 1.0;
-  col = mix(dry, col * inside, u_mix);
-  if (uv.x < uSplit) { col = dry; a = 1.0; }
-  o = vec4(col * a, a);
-}`;
-
-  window.AtlasShaders = { VERT, SIGNAL, COPY, BLUR, SCREEN };
+  window.AtlasShaders = { VERT, COMMON, MOSH, SIGNAL, COPY, BLUR };
 })();
