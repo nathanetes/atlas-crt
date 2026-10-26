@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Pre Grade module:** exposure, brightness, contrast, saturation, temperature, tint and hue on the source before it reaches the tube, so the signal, beams and glow all work on the graded picture.
+- **Exposure in Post Grade** (the old Grade module), in stops. Brightness and Contrast moved there from Master, so each grade has exposure, brightness, contrast and color.
+- **Dust Opacity** and **Speck Opacity** in Noise & Film, to make dust, scratches and RF specks fainter without making them rarer.
+- **Moiré Coverage** and **Moiré Drift** in Capture.
+
+### Changed
+
+- **Moiré is now an overlay on the whole picture.** The simulated camera from v2.0.0-beta only produced moiré where the phosphor mask was on and the picture was lit, so it did nothing from Init and showed as rainbow dots on bright detail. The bands are now drawn across the whole tube face, smooth and independent of the mask. Coverage sets how far they carry into dark areas, and Rings now scales the same way on any aspect ratio. Moiré Angle defaults to 0 (horizontal bands).
+- Phone Off Screen, Rainbow Grille and Filmed Off TV are retuned for the new moiré.
+
 ## v2.0.0-beta
 
 A rebuilt renderer. The tube now works in linear light, so beams, phosphors and glow add up the way light does on a real screen, and Atlas CRT can now carry the picture over a real composite signal, onto tape, and through an interlaced raster. The factory looks are new to match.

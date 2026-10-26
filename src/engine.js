@@ -1,4 +1,4 @@
-// Atlas CRT WebGL2 engine: source upload -> (datamosh) -> signal raster -> glow pyramids -> screen.
+// Atlas CRT WebGL2 engine: source upload -> (pre grade) -> (datamosh) -> signal raster -> glow pyramids -> screen.
 // The signal raster is gamma-encoded; the glow pyramids and the screen's beams, mask and glow work in linear light.
 (function () {
   const RASTER = {
@@ -10,6 +10,8 @@
   };
   // composite video is always 188 subcarrier cycles across the active line, 4 samples per cycle
   const COMP_W = 752;
+  // Pre Grade at these values leaves the source untouched, so its pass is skipped
+  const PRE_NEUTRAL = { preExp: 0, preBright: 0, preContrast: 1, preSat: 1, preTemp: 0, preTint: 0, preHue: 0 };
 
   class AtlasEngine {
     constructor(canvas) {
@@ -31,8 +33,7 @@
         lincopy: this._program(S.VERT, S.LINCOPY),
         blur: this._program(S.VERT, S.BLUR),
         screen: this._program(S.VERT, S.SCREEN),
-        sensor: this._program(S.VERT, S.SENSOR),
-        demosaic: this._program(S.VERT, S.DEMOSAIC),
+        pregrade: this._program(S.VERT, S.PREGRADE),
       };
       this.srcTex = this._texture(true);
       this.quality = 'SD';
@@ -165,6 +166,9 @@
       const lines = r.lines ? Math.round(r.lines / Math.min(1, aspect)) : Math.min(this.srcH, this.expH);
       const width = Math.min(this.maxTex, Math.round(lines * aspect * r.wide));
       [this.sig, this.low, this.mosh, this.A, this.B, this.C, this.D, this.comp].forEach(set => set && set.forEach(t => this._free(t)));
+      // the pre-graded source: twice the raster is plenty, since the signal pass reads it at raster size
+      this._free(this.pre);
+      this.pre = this._target(Math.min(this.srcW, width * 2), Math.min(this.srcH, lines * 2), true);
       const pair = () => [this._target(width, lines, true), this._target(width, lines, true)];
       this.sig = pair();
       this.comp = [this._target(COMP_W, lines, false), this._target(COMP_W, lines, true)]; // encoded wire, decoded picture
@@ -234,13 +238,21 @@
       const cur = this.sig[this.ping], prev = this.sig[1 - this.ping];
       U.uRes = [cur.w, cur.h];
 
+      // pre grade, only when it changes something
+      let base = this.srcTex, baseRes = [this.srcW, this.srcH];
+      if (Object.keys(PRE_NEUTRAL).some((k) => Math.abs((params[k] ?? PRE_NEUTRAL[k]) - PRE_NEUTRAL[k]) > 1e-4)) {
+        this._pass(this.progs.pregrade, this.pre, U, { uTex: this.srcTex });
+        this._mips(this.pre);
+        base = this.pre.tex; baseRes = [this.pre.w, this.pre.h];
+      }
+
       // keep the last two source frames at raster size so datamosh can estimate motion
       const lowCur = this.low[this.lowPing], lowPrev = this.low[1 - this.lowPing];
-      this._pass(this.progs.copy, lowCur, {}, { uTex: this.srcTex });
+      this._pass(this.progs.copy, lowCur, {}, { uTex: base });
       this._mips(lowCur);
       this.lowPing = 1 - this.lowPing;
 
-      let signalSrc = this.srcTex, srcRes = [this.srcW, this.srcH];
+      let signalSrc = base, srcRes = baseRes;
       if (params.mosh > 0.001) {
         if (this.moshFresh) this.mosh.forEach((t) => this._clear(t));
         this.moshFresh = false;
@@ -285,32 +297,7 @@
         uSig: picture, uBlurA: this.A[0].tex, uBlurB: this.B[0].tex, uBlurC: this.C[0].tex, uBlurD: this.D[0].tex, uSrc: this.srcTex,
       };
 
-      // a camera filming the tube, only while moiré is on. It always shoots at export resolution,
-      // so the fitted preview shows the same photo as the export, scaled down through its mipmaps.
-      U.uSensorRes = [1, 1]; U.uPitchS = 1; U.uExpRes = [this.expW, this.expH];
-      let cameraTex = this.srcTex; // bound but unread when the camera is off
-      if (Math.max(params.moire || 0, params.rainbow || 0) > 0.001) {
-        const type = Math.round(params.maskType), ms = params.maskScale;
-        const stripe = type === 3 ? 0.67 + 0.93 * ms : 1 + 11 * ms * ms; // maskPitch() in screen-shader.js, in export pixels
-        // two photosites per colour triad, so the Bayer filter's red and blue sites (every other
-        // photosite) sit one triad apart; Density nudges the pitch off so the grids beat in broad bands
-        const pitch = Math.max(1, 1.5 * stripe * (1.002 + 0.08 * params.moirePitch * params.moirePitch));
-        // enough photosites to cover the frame at any camera angle, with room for the lens bend
-        const a = Math.abs(params.moireAngle * Math.PI / 180), c = Math.cos(a), s = Math.sin(a);
-        const w = Math.ceil((this.expW * c + this.expH * s) * 1.12 / pitch) + 4;
-        const h = Math.ceil((this.expW * s + this.expH * c) * 1.12 / pitch) + 4;
-        if (!this.sensor || this.sensor.w !== w || this.sensor.h !== h) {
-          this._free(this.sensor); this._free(this.camera);
-          this.sensor = this._target(w, h, false);   // raw photosites
-          this.camera = this._target(w, h, true);    // the developed photo, mipmapped
-        }
-        U.uSensorRes = [w, h]; U.uPitchS = pitch;
-        this._pass(this.progs.sensor, this.sensor, U, tube);
-        this._pass(this.progs.demosaic, this.camera, U, { ...tube, uSensor: this.sensor.tex });
-        this._mips(this.camera);
-        cameraTex = this.camera.tex;
-      }
-      this._pass(this.progs.screen, null, U, { ...tube, uSensor: cameraTex, uCamera: cameraTex });
+      this._pass(this.progs.screen, null, U, tube);
       this.ping = 1 - this.ping;
       return true;
     }
