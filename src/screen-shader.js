@@ -1,0 +1,264 @@
+// Atlas CRT shader sources, part 2: the screen pass. It draws the tube at output
+// resolution (geometry, beams, phosphor mask, glow, the camera filming it), then the
+// creative grade and the film stock on top.
+(function () {
+  const S = window.AtlasShaders;
+
+  S.SCREEN = S.COMMON + `
+uniform sampler2D uSig, uBlurA, uBlurB, uSrc;
+uniform vec2 uOut, uSigRes;
+uniform float uTime, uFrame, uAspect, uSplit, uScale;
+uniform float u_mix, u_bright, u_contrast, u_postGlow, u_halation;
+uniform float u_maskType, u_maskScale, u_phosphor, u_scanlines, u_refresh, u_persistence;
+uniform float u_sync, u_ripple, u_flicker, u_softness, u_pbloom, u_overscan;
+uniform float u_capture, u_shutter, u_pulseContrast, u_bandAngle, u_readout;
+uniform float u_moire, u_rainbow, u_moirePitch, u_moireAngle, u_moireRings;
+uniform float u_conv, u_convAngle, u_pconv;
+uniform float u_glow, u_spectral, u_curve, u_stretch, u_fisheye, u_outside, u_extend, u_vignette, u_tint;
+uniform float u_hue, u_sat, u_temp, u_tintGM, u_shHue, u_shAmt, u_hiHue, u_hiAmt, u_lift, u_gamma;
+uniform float u_poster, u_solar, u_gmap, u_cross, u_invert, u_chanSwap, u_grunge, u_crush;
+uniform float u_film, u_filmSize, u_filmColor, u_filmResp, u_filmVar, u_dust, u_weave;
+
+vec3 sigLine(float l, float x) {
+  l = clamp(l, 0.0, uSigRes.y - 1.0);
+  return textureLod(uSig, vec2(x, (l + 0.5) / uSigRes.y), 0.0).rgb;
+}
+// one scanline's beam: brighter lines draw wider, normalised so average light holds
+vec3 beamW(vec3 c, float d) {
+  vec3 s = (0.2 + 0.12 * clamp(c, 0.0, 1.5) * (0.5 + u_pbloom)) * (1.0 + u_softness);
+  return c * exp(-d * d / (2.0 * s * s)) / (s * 2.5066);
+}
+vec3 beam(vec2 uv) {
+  float yl = uv.y * uSigRes.y - 0.5;
+  float l0 = floor(yl), f = yl - l0;
+  vec3 c0 = sigLine(l0, uv.x), c1 = sigLine(l0 + 1.0, uv.x);
+  vec3 lin = mix(c0, c1, f);
+  float amt = u_scanlines * smoothstep(2.0, 3.5, uOut.y / uSigRes.y);
+  if (amt < 0.001) return lin;
+  vec3 sc = beamW(sigLine(l0 - 1.0, uv.x), f + 1.0) + beamW(c0, f) + beamW(c1, 1.0 - f) + beamW(sigLine(l0 + 2.0, uv.x), 2.0 - f);
+  return mix(lin, sc, amt);
+}
+
+// sub-stripe width in canvas pixels, up to 12px at full Mask Scale; uScale shrinks it for the fitted preview
+float maskPitch(int type) {
+  return (type == 3 ? mix(0.67, 1.6, u_maskScale) : 1.0 + 11.0 * u_maskScale * u_maskScale) * uScale;
+}
+vec3 maskAt(vec2 fc) {
+  int type = int(u_maskType + 0.5);
+  float u = maskPitch(type);
+  if (type == 1) return triad(fc.x / (3.0 * u)) * 2.4;            // aperture grille
+  if (type == 0 || type == 3) {                                     // slot mask / fine slot
+    float col = floor(fc.x / (3.0 * u));
+    float y = fract(fc.y / (3.45 * u) + mod(col, 2.0) * 0.5);
+    float gap = smoothstep(0.7, 0.8, y) * (1.0 - smoothstep(0.92, 1.0, y));
+    return triad(fc.x / (3.0 * u)) * (1.0 - 0.85 * gap) * 2.7;
+  }
+  if (type == 2) {                                                  // delta dot shadow mask
+    vec2 g = fc / (u * 2.0);
+    float row = floor(g.y);
+    g.x += mod(row, 2.0) * 0.5;
+    vec2 id = floor(g);
+    float d = length((fract(g) - 0.5) * vec2(1.0, 1.15));
+    float ch = mod(id.x + 2.0 * row, 3.0);
+    vec3 m = vec3(float(ch < 0.5), float(ch > 0.5 && ch < 1.5), float(ch > 1.5));
+    return m * (1.0 - smoothstep(0.32, 0.5, d)) * 4.8;
+  }
+  vec2 f = fract(fc / (3.0 * u));                                    // square grid
+  float rowLit = smoothstep(0.0, 0.15, f.y) * (1.0 - smoothstep(0.85, 1.0, f.y));
+  return triad(fc.x / (3.0 * u)) * rowLit * 3.0;
+}
+
+float bayer4(vec2 p) {
+  ivec2 q = ivec2(mod(p, 4.0));
+  const float m[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+  return (m[q.x + q.y * 4] + 0.5) / 16.0;
+}
+float grainN(vec2 p) { return (vnoise(p) + 0.5 * vnoise(p * 2.13 + 7.1) - 0.75) * 1.6; }
+
+void main() {
+  vec2 uv = vUv;
+  float t = uTime;
+  vec2 p = uv * 2.0 - 1.0;
+
+  // deflection: gate weave, sync wander, supply ripple, overscan, glass and lens
+  p += u_weave * vec2(0.008 * (vnoise1(t * 3.1) - 0.5), 0.012 * (vnoise1(t * 2.3 + 5.0) - 0.5));
+  float slip = step(0.985, hash11(floor(t * 8.0))) * (hash11(floor(t * 8.0) + 3.0) - 0.5);
+  p.y += u_sync * (0.012 * (vnoise1(t * 2.3) - 0.5) + 0.08 * slip);
+  p.x += u_ripple * 0.006 * sin(6.2831853 * (uv.y * 2.0 - t * 0.5));
+  p *= 1.0 - u_overscan * 0.18;
+  vec2 ph = p * vec2(uAspect, 1.0);
+  float r2 = dot(ph, ph) / (uAspect * uAspect + 1.0);
+  p *= 1.0 + (u_curve * 0.3 + u_fisheye * 0.22) * r2;
+  p.y += u_stretch * 0.1 * (1.0 - p.y * p.y);
+  vec2 suv = p * 0.5 + 0.5;
+
+  float inside = 1.0;
+  if (u_extend > 0.5) {
+    suv = clamp(suv, 0.0, 1.0);
+  } else {
+    float rad = u_curve * 0.12;
+    vec2 q = abs(suv - 0.5) * 2.0 * vec2(uAspect, 1.0) - vec2(uAspect, 1.0) + rad;
+    float sdf = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rad;
+    float px = 2.0 / uOut.y;
+    inside = 1.0 - smoothstep(-px, px, sdf);
+  }
+
+  // beams with convergence error
+  vec3 col;
+  if (u_conv > 0.001) {
+    float a = radians(u_convAngle);
+    vec2 coff = (p * 0.006 + vec2(cos(a), sin(a)) * 0.004) * u_conv;
+    col = vec3(beam(suv + coff).r, beam(suv).g, beam(suv - coff).b);
+  } else {
+    col = beam(suv);
+  }
+
+  // phosphor mask, drawn on the glass so it follows the curve; above 1 the gaps go black
+  int mtype = int(u_maskType + 0.5);
+  if (u_phosphor > 0.001) {
+    vec2 mfc = suv * uOut;
+    vec3 m;
+    if (u_pconv > 0.001) {
+      float sh = u_pconv * 1.5 * maskPitch(mtype);
+      m = vec3(maskAt(mfc + vec2(sh, 0.0)).r, maskAt(mfc).g, maskAt(mfc - vec2(sh, 0.0)).b);
+    } else {
+      m = maskAt(mfc);
+    }
+    // a mask finer than the canvas can show is drawn as its average instead of aliasing
+    m = mix(vec3(0.92), m, smoothstep(0.55, 1.2, maskPitch(mtype)));
+    m = mix(m, vec3(1.0), clamp((lum(col) - 0.55) * 1.5, 0.0, 1.0) * u_pbloom);
+    col *= max(mix(vec3(1.0), m, u_phosphor), 0.0);
+  }
+
+  // light spreading in the signal path and the glass; bloom from highlights plus a faint veil
+  vec3 bA = texture(uBlurA, suv).rgb;
+  vec3 bB = texture(uBlurB, suv).rgb;
+  col += (max(bA - 0.25, 0.0) * 1.1 + bA * 0.1) * u_postGlow;
+  col += (max(bB - 0.3, 0.0) * 1.5 + bB * 0.15) * u_glow;
+  if (u_spectral > 0.001) {
+    vec2 so = p * 0.02 * u_spectral;
+    vec3 sb = vec3(texture(uBlurA, suv + so).r, bA.g, texture(uBlurA, suv - so).b);
+    col += max(sb - 0.25, 0.0) * u_spectral * 1.6 * vec3(1.0, 0.9, 1.2);
+  }
+  if (u_halation > 0.001) col += bB * vec3(1.0, 0.32, 0.14) * smoothstep(0.35, 1.0, lum(bB)) * u_halation * 1.8;
+
+  // camera filming the tube: scan pulse against the shutter
+  if (u_capture > 0.001) {
+    float yT = 1.0 - suv.y;
+    float ys = yT + tan(radians(clamp(u_bandAngle, -85.0, 85.0))) * (suv.x - 0.5) * uAspect * 0.5;
+    ys = u_readout > 1.0 ? (1.0 - ys) * u_readout : ys * (1.0 + u_readout * 0.6);
+    float beat = u_refresh - 30.0 * floor(u_refresh / 30.0 + 0.5);
+    float pos = fract(t * (beat * 0.6 + 0.12));
+    float expo = clamp(u_refresh / u_shutter, 0.02, 4.0);
+    float d = fract(pos - ys);
+    float tau = 0.015 + u_persistence * 0.5;
+    float fe = fract(expo);
+    float lit = 1.0 - smoothstep(fe - 0.015, fe + 0.015, d);
+    float pulse;
+    if (expo < 1.0) {
+      float tail = exp(-max(d - fe, 0.0) / tau);
+      pulse = max(lit, tail) / pow(fe + tau * (1.0 - exp(-(1.0 - fe) / tau)), 0.7);
+    } else {
+      pulse = (floor(expo) + lit) / expo;
+    }
+    col *= mix(1.0, pulse, clamp(u_capture * u_pulseContrast * 0.6, 0.0, 1.2));
+  }
+
+  // the camera sensor beating against the (curved) grille: colour bands and rings
+  if (u_moire + u_rainbow > 0.001) {
+    float mu = 3.0 * maskPitch(mtype);
+    vec2 fcR = rot(radians(u_moireAngle)) * (gl_FragCoord.xy - uOut * 0.5);
+    float det = mix(0.004, 0.08, u_moirePitch);
+    float beat = (suv.x * uOut.x - uOut.x * 0.5) / mu - fcR.x / (mu * (1.0 + det));
+    float lineP = uOut.y / uSigRes.y;
+    float beatY = (suv.y * uOut.y - uOut.y * 0.5) / lineP - fcR.y / (lineP * (1.0 + det));
+    beat += u_moireRings * 9.0 * r2 + 0.15 * sin(6.2831853 * beatY);
+    col *= mix(vec3(1.0), triad(beat) / 0.375, u_rainbow * 0.55);
+    float lm = 0.5 + 0.25 * cos(6.2831853 * beat) + 0.25 * cos(6.2831853 * beatY);
+    col *= mix(1.0, 0.4 + 1.2 * lm, u_moire * 0.7);
+  }
+  col *= 1.0 - u_flicker * (0.1 * hash11(uFrame * 0.61 + 0.3) + 0.05 * sin(t * 47.0));
+  col *= 1.0 - u_vignette * 0.55 * smoothstep(0.3, 1.0, r2);
+
+  // grade and soft shoulder
+  col = max((col - 0.5) * u_contrast + 0.5 + u_bright, 0.0);
+  col = mix(col, 0.8 + 0.2 * tanh((col - 0.8) / 0.2), step(0.8, col));
+
+  // creative colour
+  if (abs(u_hue) > 0.5) { vec3 y = RGB2YIQ * col; y.yz = rot(radians(u_hue)) * y.yz; col = YIQ2RGB * y; }
+  col = max(mix(vec3(lum(col)), col, u_sat), 0.0);
+  col *= vec3(1.0 + 0.22 * u_temp, 1.0 - 0.18 * u_tintGM, 1.0 - 0.22 * u_temp);
+  vec3 shC = hue2rgb(u_shHue / 360.0), hiC = hue2rgb(u_hiHue / 360.0);
+  float l = lum(col);
+  col += (shC - 0.5) * u_shAmt * 0.5 * (1.0 - smoothstep(0.0, 0.6, l));
+  col += (hiC - 0.5) * u_hiAmt * 0.5 * smoothstep(0.4, 1.0, l);
+  if (u_gmap > 0.001) col = mix(col, mix(shC * 0.12, mix(hiC, vec3(1.0), 0.3), smoothstep(0.0, 1.0, l)), u_gmap);
+  if (u_cross > 0.001) col = mix(col, vec3(smoothstep(0.05, 0.95, col.r), col.g * 0.9 + 0.05, col.b * 0.7 + 0.15), u_cross);
+  col = max(col, 0.0);
+  col = u_lift >= 0.0 ? col * (1.0 - u_lift) + u_lift : max(col + u_lift, 0.0) / (1.0 + u_lift);
+  col = pow(col, vec3(1.0 / u_gamma));
+  if (u_solar > 0.001) col = mix(col, 1.0 - abs(1.0 - 2.0 * col), u_solar);
+  if (u_poster > 0.001) { float lv = mix(24.0, 2.0, u_poster); col = floor(col * lv + 0.5) / lv; }
+  col = mix(col, 1.0 - col, u_invert);
+  int cs = int(u_chanSwap + 0.5);
+  col = cs == 1 ? col.rbg : cs == 2 ? col.grb : cs == 3 ? col.gbr : cs == 4 ? col.brg : cs == 5 ? col.bgr : col;
+  if (u_grunge > 0.001) {
+    vec2 gq = uv * vec2(uAspect, 1.0);
+    float dirt = smoothstep(0.35, 0.8, vnoise(gq * 3.0) * 0.6 + vnoise(gq * 11.0 + 4.0) * 0.4);
+    vec3 g = mix(col, vec3(lum(col)) * vec3(1.05, 1.0, 0.85), 0.5);
+    g *= 1.0 - dirt * 0.45;
+    g = mix(g, g * vec3(0.88, 0.8, 0.6) * 1.6, dirt * 0.5);
+    col = mix(col, (g - 0.5) * 1.15 + 0.47, u_grunge);
+  }
+
+  // monochrome tubes: one phosphor, whose hottest cores burn toward white
+  int tint = int(u_tint + 0.5);
+  if (tint > 0) {
+    vec3 phc = tint == 1 ? vec3(0.239, 1.0, 0.447) : tint == 2 ? vec3(1.0, 0.69, 0.18) : vec3(0.93, 0.96, 1.0);
+    float lt = lum(col);
+    col = phc * lt + max(lt - 0.75, 0.0) * 0.8 * (vec3(1.0) - phc);
+  }
+
+  // film stock: grain that clumps and breathes, dust and scratches
+  if (u_film > 0.001) {
+    float sz = mix(1.0, 4.0, u_filmSize) * uScale;
+    vec2 gp = gl_FragCoord.xy / max(sz, 0.35);
+    vec2 off = vec2(hash11(uFrame * 0.13), hash11(uFrame * 0.71 + 3.0)) * 977.0;
+    vec3 n = vec3(grainN(gp + off), grainN(gp + off + 31.7), grainN(gp + off + 67.3));
+    vec3 g = mix(vec3(n.x), n, u_filmColor);
+    float patchy = 1.0 + u_filmVar * (vnoise(uv * vec2(uAspect, 1.0) * 5.0 + uFrame * 0.37) - 0.5) * 1.6;
+    float breathe = 1.0 + u_filmVar * (hash11(uFrame * 0.91) - 0.5) * 0.8;
+    float lc = lum(col);
+    float resp = exp(-pow((lc - mix(0.2, 0.8, u_filmResp)) / 0.4, 2.0)) * 0.8 + 0.2;
+    col += g * u_film * 0.32 * resp * patchy * breathe * clamp(sz, 0.4, 1.0);
+    col *= 1.0 + u_filmVar * 0.07 * (hash11(uFrame * 1.7) - 0.5);
+  }
+  if (u_dust > 0.001) {
+    vec2 dq = uv * vec2(uAspect, 1.0) * 36.0;
+    vec2 cell = floor(dq);
+    if (hash12(cell + uFrame * 17.1) < u_dust * 0.025) {
+      float d = length(fract(dq) - vec2(hash12(cell + 1.3), hash12(cell + 2.7)));
+      float r = 0.05 + 0.2 * hash12(cell + 5.0);
+      col = mix(col, vec3(hash12(cell + 9.0) > 0.5 ? 0.02 : 0.95), (1.0 - smoothstep(r * 0.5, r, d)) * 0.85);
+    }
+    for (int i = 0; i < 3; i++) {
+      float fi = float(i);
+      float seed = floor(uFrame / (6.0 + fi * 3.0));
+      float on = step(1.0 - u_dust * 0.6, hash11(seed * 2.1 + fi));
+      float sx = hash11(seed * 1.3 + fi * 7.0) + 0.002 * sin(uv.y * 20.0 + seed);
+      float w = 0.0006 + 0.001 * hash11(seed + fi * 3.0);
+      float line = (1.0 - smoothstep(w * 0.5, w, abs(uv.x - sx))) * on;
+      col = mix(col, vec3(0.9), line * 0.6 * (0.4 + 0.6 * vnoise1(uv.y * 30.0 + seed)));
+    }
+  }
+  if (u_crush > 0.001) { float lv = exp2(mix(7.0, 1.0, u_crush)); col = floor(col * lv + bayer4(gl_FragCoord.xy)) / lv; }
+  col = max(col, 0.0);
+
+  // dry/wet, compare split, outside the tube
+  vec3 dry = texture(uSrc, uv).rgb;
+  float a = u_outside > 0.5 ? mix(1.0, inside, u_mix) : 1.0;
+  col = mix(dry, col * inside, u_mix);
+  if (uv.x < uSplit) { col = dry; a = 1.0; }
+  o = vec4(col * a, a);
+}`;
+})();
