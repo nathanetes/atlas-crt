@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Automation.** Click ~ next to any slider to swing it around its value. Six shapes (sine, triangle, saw, square, random, drift), rate from 0.02 to 10 Hz, and depth. It exports with the video and saves with looks.
+- **Quick macros** on the looks tab: tube, glow, moiré, color, grime and corrupt. Each scales a family of controls at once.
+- **Corrupt module:** datamosh with block size, motion gain, drift, keyframes and residual, plus block glitch, slice shift, pixel smear, compression and bit crush.
+- **Grade module** for creative color: hue shift, saturation, temperature, tint, shadow and highlight toning, gradient map, cross process, black level, gamma, solarize, posterize, invert, channel swap and grunge.
+- **Film grain** in the Noise & Film module: size, mono-to-RGB color, shadow-to-highlight response and variation, so it clumps and breathes like film. Also dust and scratches, and gate weave.
+- **Rainbow moiré** in Capture: the camera sensor beats against the curved grille, with density, angle and rings controls.
+- **Bigger pixels.** Mask Scale goes up to 36px triads, Phosphor goes up to 1.5 where the gaps turn black, and there's a new LO raster (120 lines).
+- **14 new looks:** Rainbow Grille (it replaces Rainbow Moiré), Phone Off Screen, 16mm Print, Big Pixel Max, a new Color group (Teal Night, Cross Processed, Duotone, Grunge Zine, Solar Flare, Bleach Bypass), and Datamosh Bloom, Macroblock Rot, Pixel Melt and Slice & Dice in Glitch.
+
+### Changed
+
+- The interface is simpler: a looks tab (looks, macros, render settings, save) and an adjust tab (automation, master, modules). Raster and output size moved from the header into the looks tab.
+- The defaults are cleaner: no dropouts, hum, echo, shake or head-switch band unless a look adds them.
+- The controls window no longer flickers.
+- Sources are mipmapped, so large photos and 4K video downsample cleanly into the raster.
+
 ## v1.0.0-beta
 
 The first public beta of Atlas CRT, a CRT and analog video emulator that runs in the browser. Open a photo or video, shape the look, and export a PNG or a video. Everything renders on your GPU, and nothing is uploaded.
