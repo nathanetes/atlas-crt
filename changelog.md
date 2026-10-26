@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.2.2-beta
+
+Atlas CRT now opens with its own title intro.
+
+Try it at https://atlas-crt.nathanetes.com
+
+### Added
+
+- **Intro.** The Atlas CRT title video plays when the page opens, then fades quickly into the app, the same way the nathanetes.com intro works. It plays once per browser session (add `?intro` to the address to see it again), a click or any key skips it, and it's skipped for anyone with reduced motion turned on.
+
 ## v2.2.1-beta
 
 Moiré rebuilt on real camera physics, down to single-pixel scale, plus grading before and after the tube.

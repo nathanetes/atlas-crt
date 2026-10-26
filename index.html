@@ -266,9 +266,52 @@ details[open] .mod-chev::before { content: "[-]"; }
 @media (prefers-reduced-motion: reduce) {
   .top, .crt, .cursor, .rec-dot, .btn.primary::after { animation: none; }
 }
+
+/* intro: the Atlas CRT video on black, once per session (?intro replays), then a quick fade into the app.
+   A click or key skips it, and it's skipped for reduced motion. */
+#intro { position: fixed; inset: 0; z-index: 50; background: #000; cursor: pointer; transition: opacity .45s ease-out; }
+#intro video { display: block; width: 100%; height: 100%; object-fit: contain; }
+#intro.out { opacity: 0; pointer-events: none; }
+html.no-intro #intro { display: none; }
 </style>
+<script>
+  (function () {
+    try {
+      var replay = /[?&]intro\b/.test(location.search);
+      var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var seen = sessionStorage.getItem('atlas-intro-seen');
+      if (reduce || (!replay && seen)) document.documentElement.className += ' no-intro';
+      else sessionStorage.setItem('atlas-intro-seen', '1');
+    } catch (e) {}
+  })();
+</script>
 </head>
 <body>
+<div id="intro" aria-hidden="true"><video src="media/intro.mp4" muted playsinline preload="auto"></video></div>
+<script>
+  // play the intro and fade into the app as it finishes; a click or key skips it, and a video
+  // that fails, is blocked or stalls ends it at once so the app is never held behind it
+  (function () {
+    var el = document.getElementById('intro');
+    if (document.documentElement.classList.contains('no-intro')) { el.remove(); return; }
+    var v = el.querySelector('video'), done = false;
+    var FADE = 0.45; // seconds, matches the opacity transition
+    function end() {
+      if (done) return;
+      done = true;
+      el.classList.add('out');
+      setTimeout(function () { el.remove(); }, FADE * 1000 + 50);
+    }
+    v.addEventListener('timeupdate', function () { if (v.duration && v.currentTime >= v.duration - FADE) end(); });
+    v.addEventListener('ended', end);
+    v.addEventListener('error', end);
+    el.addEventListener('click', end);
+    addEventListener('keydown', end, { once: true });
+    var started = v.play();
+    if (started && started.catch) started.catch(end);
+    setTimeout(end, 8000);
+  })();
+</script>
 <div class="app" id="app">
   <header class="top">
     <div class="brand">
