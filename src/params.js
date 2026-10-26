@@ -1,35 +1,85 @@
-// Atlas CRT controls and factory looks.
+// Atlas CRT controls, quick macros and factory looks.
 // Control fields: k key, l label, min/max/step, d default, n value when the module
 // is switched off, u unit, opts for stepped choices, dirt = eased by Signal Clean.
 (function () {
   const pick = (labels) => labels.map((l, v) => ({ v, l }));
   const steps = (vals, unit) => vals.map(v => ({ v, l: v + unit }));
+  const amt = (k, l, d = 0, extra = {}) => ({ k, l, min: 0, max: 1, step: 0.01, d, n: 0, ...extra });
 
   const MASTER = [
-    { k: 'mix', l: 'Dry / Wet', min: 0, max: 1, step: 0.01, d: 1 },
+    { k: 'mix', l: 'Intensity', min: 0, max: 1, step: 0.01, d: 1 },
     { k: 'bright', l: 'Brightness', min: -0.25, max: 0.25, step: 0.005, d: 0 },
     { k: 'contrast', l: 'Contrast', min: 0.5, max: 2.5, step: 0.01, d: 1 },
     { k: 'clean', l: 'Signal Clean', min: 0, max: 1, step: 0.01, d: 0 },
   ];
 
+  // Quick macros scale whole families of controls away from (or toward) neutral.
+  const MACROS = [
+    { k: 'mTube', l: 'Tube', keys: ['phosphor', 'scanlines', 'maskScale', 'curve', 'vignette', 'fisheye'] },
+    { k: 'mGlow', l: 'Glow', keys: ['glow', 'postGlow', 'halation', 'spectral', 'pbloom'] },
+    { k: 'mMoire', l: 'Moiré', keys: ['moire', 'rainbow', 'capture'] },
+    { k: 'mColor', l: 'Color', keys: ['chroma', 'hueDrift', 'bleed', 'rgbSplit', 'conv', 'hue', 'sat', 'temp', 'tintGM', 'shAmt', 'hiAmt', 'gmap', 'cross', 'solar', 'grunge'] },
+    { k: 'mGrime', l: 'Grime', keys: ['shake', 'tear', 'roll', 'flash', 'dropout', 'hum', 'echo', 'headSwitch', 'topLine', 'rf', 'grain', 'film', 'dust', 'weave', 'sync', 'ripple', 'flicker'] },
+    { k: 'mCorrupt', l: 'Corrupt', keys: ['mosh', 'blockGlitch', 'slices', 'smear', 'compress', 'crush', 'bend', 'waves'] },
+  ].map((m) => ({ ...m, min: 0, max: 2, step: 0.01, d: 1 }));
+
   const GROUPS = [
     {
       id: 'color', title: 'Color Signal', hint: 'Composite decode: gain, chroma, bleed and glow in the signal path.',
       controls: [
-        { k: 'gain', l: 'Brightness Gain', min: 0.4, max: 2, step: 0.01, d: 1.05, n: 1 },
-        { k: 'chroma', l: 'Chroma Level', min: 0, max: 2.5, step: 0.01, d: 1.15, n: 1 },
-        { k: 'hueDrift', l: 'Hue Drift', min: 0, max: 1.2, step: 0.01, d: 0.02, n: 0, dirt: 1 },
-        { k: 'bleed', l: 'Chroma Bleed', min: 0, max: 1, step: 0.01, d: 0.35, n: 0, dirt: 1 },
-        { k: 'rgbSplit', l: 'RGB Split', min: 0, max: 1, step: 0.01, d: 0.06, n: 0, dirt: 1 },
-        { k: 'sharpen', l: 'Post Sharpen', min: 0, max: 1, step: 0.01, d: 0.2, n: 0 },
-        { k: 'postGlow', l: 'Post Glow', min: 0, max: 1, step: 0.01, d: 0.15, n: 0 },
-        { k: 'halation', l: 'Halation', min: 0, max: 1, step: 0.01, d: 0.2, n: 0 },
+        { k: 'gain', l: 'Brightness Gain', min: 0.4, max: 2, step: 0.01, d: 1, n: 1 },
+        { k: 'chroma', l: 'Chroma Level', min: 0, max: 2.5, step: 0.01, d: 1.1, n: 1 },
+        amt('hueDrift', 'Hue Drift', 0, { max: 1.2, dirt: 1 }),
+        amt('bleed', 'Chroma Bleed', 0.25, { dirt: 1 }),
+        amt('rgbSplit', 'RGB Split', 0.04, { dirt: 1 }),
+        amt('sharpen', 'Post Sharpen', 0.15),
+        amt('postGlow', 'Post Glow', 0.12),
+        amt('halation', 'Halation', 0.15),
+      ],
+    },
+    {
+      id: 'grade', title: 'Grade', hint: 'Creative color after the tube: split toning, curves, posterize, grunge.',
+      controls: [
+        { k: 'hue', l: 'Hue Shift', min: -180, max: 180, step: 1, d: 0, n: 0, u: '°' },
+        { k: 'sat', l: 'Saturation', min: 0, max: 2, step: 0.01, d: 1, n: 1 },
+        { k: 'temp', l: 'Temperature', min: -1, max: 1, step: 0.01, d: 0, n: 0 },
+        { k: 'tintGM', l: 'Tint', min: -1, max: 1, step: 0.01, d: 0, n: 0 },
+        { k: 'shHue', l: 'Shadow Color', min: 0, max: 360, step: 1, d: 200, u: '°' },
+        amt('shAmt', 'Shadow Tint'),
+        { k: 'hiHue', l: 'Highlight Color', min: 0, max: 360, step: 1, d: 35, u: '°' },
+        amt('hiAmt', 'Highlight Tint'),
+        amt('gmap', 'Gradient Map'),
+        amt('cross', 'Cross Process'),
+        { k: 'lift', l: 'Black Level', min: -0.2, max: 0.3, step: 0.005, d: 0, n: 0 },
+        { k: 'gamma', l: 'Gamma', min: 0.4, max: 2.5, step: 0.01, d: 1, n: 1 },
+        amt('solar', 'Solarize'),
+        amt('poster', 'Posterize'),
+        amt('invert', 'Invert'),
+        { k: 'chanSwap', l: 'Channel Swap', d: 0, n: 0, opts: pick(['RGB', 'RBG', 'GRB', 'GBR', 'BRG', 'BGR']) },
+        amt('grunge', 'Grunge'),
+      ],
+    },
+    {
+      id: 'corrupt', title: 'Corrupt', hint: 'Codec damage: datamosh, macroblocks, slices, pixel smear, bit crush.',
+      controls: [
+        amt('mosh', 'Datamosh', 0, { dirt: 1 }),
+        { k: 'moshBlock', l: 'Mosh Block Size', min: 0, max: 1, step: 0.01, d: 0.4 },
+        { k: 'moshGain', l: 'Motion Gain', min: 0, max: 4, step: 0.01, d: 1.5 },
+        { k: 'moshDrift', l: 'Drift', min: 0, max: 1, step: 0.01, d: 0.2 },
+        { k: 'moshRefresh', l: 'Keyframes', min: 0, max: 1, step: 0.01, d: 0.1 },
+        { k: 'moshResid', l: 'Residual', min: 0, max: 1, step: 0.01, d: 0.3 },
+        amt('blockGlitch', 'Block Glitch', 0, { dirt: 1 }),
+        amt('slices', 'Slice Shift', 0, { dirt: 1 }),
+        amt('smear', 'Pixel Smear', 0, { dirt: 1 }),
+        { k: 'smearThresh', l: 'Smear Threshold', min: 0, max: 1, step: 0.01, d: 0.6 },
+        amt('compress', 'Compression', 0, { dirt: 1 }),
+        amt('crush', 'Bit Crush'),
       ],
     },
     {
       id: 'bend', title: 'Circuit Bend', hint: 'A resonant, nonlinear stage that rings after edges and folds over.',
       controls: [
-        { k: 'bend', l: 'Amount', min: 0, max: 1, step: 0.01, d: 0, n: 0, dirt: 1 },
+        amt('bend', 'Amount', 0, { dirt: 1 }),
         { k: 'bendMotion', l: 'Motion', min: -1, max: 1, step: 0.01, d: 0.2 },
         { k: 'bendFreq', l: 'Frequency', min: 0.05, max: 5.5, step: 0.01, d: 1.8, u: 'MHz' },
         { k: 'bendQ', l: 'Q', min: 0.25, max: 30, step: 0.05, d: 6 },
@@ -43,30 +93,37 @@
     {
       id: 'damage', title: 'Damage', hint: 'Time-base and tape faults: shake, tears, roll, dropouts.',
       controls: [
-        { k: 'shake', l: 'Shake', min: 0, max: 1, step: 0.01, d: 0.04, n: 0, dirt: 1 },
-        { k: 'tear', l: 'Tear', min: 0, max: 1, step: 0.01, d: 0, n: 0, dirt: 1 },
-        { k: 'roll', l: 'Vertical Roll', min: 0, max: 1, step: 0.01, d: 0, n: 0, dirt: 1 },
-        { k: 'flash', l: 'Exposure Flash', min: 0, max: 1, step: 0.01, d: 0, n: 0, dirt: 1 },
-        { k: 'dropout', l: 'Dropouts', min: 0, max: 1, step: 0.01, d: 0.05, n: 0, dirt: 1 },
+        amt('shake', 'Shake', 0, { dirt: 1 }),
+        amt('tear', 'Tear', 0, { dirt: 1 }),
+        amt('roll', 'Vertical Roll', 0, { dirt: 1 }),
+        amt('flash', 'Exposure Flash', 0, { dirt: 1 }),
+        amt('dropout', 'Dropouts', 0, { dirt: 1 }),
         { k: 'dropStyle', l: 'Dropout Style', d: 0, opts: pick(['White Streak', 'Black', 'Line Hold', 'Chroma Loss', 'TBC Tear']) },
-        { k: 'hum', l: 'Hum Band', min: 0, max: 1, step: 0.01, d: 0.08, n: 0, dirt: 1 },
-        { k: 'echo', l: 'Signal Echo', min: -1, max: 1, step: 0.01, d: 0.05, n: 0, dirt: 1 },
-        { k: 'headSwitch', l: 'Head-Switch Band', min: 0, max: 1, step: 0.01, d: 0.15, n: 0, dirt: 1 },
-        { k: 'topLine', l: 'Top-Line Spectral', min: 0, max: 1, step: 0.01, d: 0, n: 0, dirt: 1 },
+        amt('hum', 'Hum Band', 0, { dirt: 1 }),
+        { k: 'echo', l: 'Signal Echo', min: -1, max: 1, step: 0.01, d: 0, n: 0, dirt: 1 },
+        amt('headSwitch', 'Head-Switch Band', 0, { dirt: 1 }),
+        amt('topLine', 'Top-Line Spectral', 0, { dirt: 1 }),
       ],
     },
     {
-      id: 'noise', title: 'Noise', hint: 'Reception specks and tape grain.',
+      id: 'noise', title: 'Noise & Film', hint: 'Reception specks, tape grain, and film stock grain that clumps and breathes.',
       controls: [
-        { k: 'rf', l: 'RF Specks', min: 0, max: 1, step: 0.01, d: 0.04, n: 0, dirt: 1 },
+        amt('film', 'Film Grain', 0.08),
+        { k: 'filmSize', l: 'Grain Size', min: 0, max: 1, step: 0.01, d: 0.3 },
+        { k: 'filmColor', l: 'Grain Color', min: 0, max: 1, step: 0.01, d: 0.3, u: 'mono → rgb' },
+        { k: 'filmResp', l: 'Grain Response', min: 0, max: 1, step: 0.01, d: 0.5, u: 'shadows → highlights' },
+        { k: 'filmVar', l: 'Grain Variation', min: 0, max: 1, step: 0.01, d: 0.3 },
+        amt('dust', 'Dust & Scratches'),
+        amt('weave', 'Gate Weave'),
+        amt('grain', 'Tape Grain', 0.04, { dirt: 1 }),
+        amt('rf', 'RF Specks', 0, { dirt: 1 }),
         { k: 'speckSize', l: 'Speck Size', min: 0, max: 1, step: 0.01, d: 0.3 },
-        { k: 'grain', l: 'Tape Grain', min: 0, max: 1, step: 0.01, d: 0.18, n: 0, dirt: 1 },
       ],
     },
     {
       id: 'waves', title: 'Waves', hint: 'Modulation bands rolling through the picture. Raise Amount to engage.',
       controls: [
-        { k: 'waves', l: 'Amount', min: 0, max: 1, step: 0.01, d: 0, n: 0, dirt: 1 },
+        amt('waves', 'Amount', 0, { dirt: 1 }),
         { k: 'waveCount', l: 'Band Count', min: 10, max: 150, step: 1, d: 40 },
         { k: 'waveReact', l: 'Picture React', min: 0, max: 0.3, step: 0.005, d: 0.05 },
         { k: 'waveSmooth', l: 'Smooth Bands', min: 0, max: 8, step: 0.1, d: 3 },
@@ -77,50 +134,53 @@
       ],
     },
     {
-      id: 'screen', title: 'Screen', hint: 'The tube face: phosphor mask, scanlines, refresh and beam.',
+      id: 'screen', title: 'Screen', hint: 'The tube face: phosphor mask, scanlines, refresh and beam. Push Mask Scale and Phosphor for big pixels.',
       controls: [
         { k: 'tint', l: 'Phosphor Color', d: 0, opts: pick(['Full Color', 'Green', 'Amber', 'White']) },
         { k: 'maskType', l: 'Screen Type', d: 1, opts: pick(['Slot Mask', 'Aperture Grille', 'Delta Dot', 'Fine Slot', 'Square Grid']) },
-        { k: 'maskScale', l: 'Mask Scale', min: 0, max: 1, step: 0.01, d: 0.35 },
-        { k: 'phosphor', l: 'Phosphor', min: 0, max: 1, step: 0.01, d: 0.55, n: 0 },
-        { k: 'scanlines', l: 'Scanlines', min: 0, max: 1, step: 0.01, d: 0.6, n: 0 },
+        { k: 'maskScale', l: 'Mask Scale', min: 0, max: 1, step: 0.01, d: 0.3 },
+        { k: 'phosphor', l: 'Phosphor', min: 0, max: 1.5, step: 0.01, d: 0.55, n: 0 },
+        amt('scanlines', 'Scanlines', 0.6),
         { k: 'refresh', l: 'Refresh', d: 59.94, opts: steps([50, 59.94, 60, 75, 85, 100, 120], ' Hz') },
-        { k: 'persistence', l: 'Persistence', min: 0, max: 1, step: 0.01, d: 0.1, n: 0 },
-        { k: 'sync', l: 'Sync', min: 0, max: 1, step: 0.01, d: 0, n: 0, dirt: 1 },
-        { k: 'ripple', l: 'Supply Ripple', min: 0, max: 1, step: 0.01, d: 0, n: 0, dirt: 1 },
-        { k: 'flicker', l: 'Flicker', min: 0, max: 1, step: 0.01, d: 0.05, n: 0 },
+        amt('persistence', 'Persistence', 0.1),
+        amt('sync', 'Sync', 0, { dirt: 1 }),
+        amt('ripple', 'Supply Ripple', 0, { dirt: 1 }),
+        amt('flicker', 'Flicker', 0.03),
         { k: 'softness', l: 'Beam Softness', min: 0, max: 1, step: 0.01, d: 0.25 },
-        { k: 'pbloom', l: 'Phosphor Bloom', min: 0, max: 1, step: 0.01, d: 0.35, n: 0 },
-        { k: 'overscan', l: 'Overscan', min: 0, max: 1, step: 0.01, d: 0.1, n: 0 },
+        amt('pbloom', 'Phosphor Bloom', 0.35),
+        amt('overscan', 'Overscan', 0.08),
       ],
     },
     {
-      id: 'capture', title: 'Capture', hint: 'A camera filming the tube: shutter against refresh, moiré, rainbow.',
+      id: 'capture', title: 'Capture', hint: 'A camera filming the tube: the sensor beating against the grille for rainbow bands and rings, plus the scan pulse.',
       controls: [
-        { k: 'capture', l: 'Screen Pulse', min: 0, max: 1, step: 0.01, d: 0, n: 0 },
+        amt('rainbow', 'Rainbow Moiré'),
+        amt('moire', 'Moiré Bands'),
+        { k: 'moirePitch', l: 'Moiré Density', min: 0, max: 1, step: 0.01, d: 0.35 },
+        { k: 'moireAngle', l: 'Moiré Angle', min: -45, max: 45, step: 0.1, d: 3, u: '°' },
+        { k: 'moireRings', l: 'Moiré Rings', min: -1, max: 1, step: 0.01, d: 0.2 },
+        amt('capture', 'Screen Pulse'),
         { k: 'shutter', l: 'Shutter', d: 48, opts: [24, 30, 48, 50, 60, 96, 120, 250, 500].map(v => ({ v, l: '1/' + v })) },
         { k: 'pulseContrast', l: 'Pulse Contrast', min: 0, max: 2, step: 0.01, d: 1 },
         { k: 'bandAngle', l: 'Band Angle', min: -90, max: 90, step: 1, d: 0, u: '°' },
         { k: 'readout', l: 'Sensor Readout', min: 0, max: 1.5, step: 0.01, d: 0 },
-        { k: 'moire', l: 'Moiré', min: 0, max: 1, step: 0.01, d: 0, n: 0 },
-        { k: 'rainbow', l: 'Rainbow', min: 0, max: 1, step: 0.01, d: 0, n: 0 },
       ],
     },
     {
       id: 'convergence', title: 'Convergence', hint: 'Red, green and blue beams landing out of register.',
       controls: [
-        { k: 'conv', l: 'Beam Convergence', min: 0, max: 1, step: 0.01, d: 0.15, n: 0 },
+        amt('conv', 'Beam Convergence', 0.1),
         { k: 'convAngle', l: 'Converge Angle', min: 0, max: 360, step: 1, d: 0, u: '°' },
-        { k: 'pconv', l: 'Phosphor Convergence', min: 0, max: 1, step: 0.01, d: 0, n: 0 },
+        amt('pconv', 'Phosphor Convergence'),
       ],
     },
     {
       id: 'glass', title: 'Glass & Optics', hint: 'Glow through the faceplate, curvature and lens warp.',
       controls: [
-        { k: 'glow', l: 'Glow', min: 0, max: 1, step: 0.01, d: 0.25, n: 0 },
-        { k: 'spectral', l: 'Spectral Bloom', min: 0, max: 1, step: 0.01, d: 0.1, n: 0 },
-        { k: 'curve', l: 'Glass Curve', min: 0, max: 1, step: 0.01, d: 0.25, n: 0 },
-        { k: 'vignette', l: 'Vignette', min: 0, max: 1, step: 0.01, d: 0.3, n: 0 },
+        amt('glow', 'Glow', 0.25),
+        amt('spectral', 'Spectral Bloom', 0.08),
+        amt('curve', 'Glass Curve', 0.25),
+        amt('vignette', 'Vignette', 0.3),
         { k: 'stretch', l: 'Line Stretch', min: -1, max: 1, step: 0.01, d: 0, n: 0 },
         { k: 'fisheye', l: 'Fisheye', min: -1, max: 2, step: 0.01, d: 0, n: 0 },
         { k: 'outside', l: 'Outside Screen', d: 0, opts: pick(['Opaque', 'Transparent']) },
@@ -129,25 +189,45 @@
     },
   ];
 
+  const ALL = [...MASTER, ...MACROS, ...GROUPS.flatMap(g => g.controls)];
   const DEFAULTS = {};
-  [...MASTER, ...GROUPS.flatMap(g => g.controls)].forEach(c => { DEFAULTS[c.k] = c.d; });
+  const BY_KEY = {};
+  ALL.forEach(c => { DEFAULTS[c.k] = c.d; BY_KEY[c.k] = c; });
 
   // Factory looks. Each is a full look laid over DEFAULTS.
   const PRESETS = [
-    { cat: 'Terminal', name: 'Terminal Glow', p: { scanlines: 0.8, softness: 0.1, maskType: 1, maskScale: 0.15, phosphor: 0.2, glow: 0.55, postGlow: 0.35, halation: 0, spectral: 0, curve: 0.15, vignette: 1, flicker: 0.2, persistence: 0.3, bleed: 0.1, rgbSplit: 0, conv: 0, contrast: 1.15, gain: 1.1, sharpen: 0.3, grain: 0.08, dropout: 0, headSwitch: 0, hum: 0.05, rf: 0, shake: 0.02, echo: 0, overscan: 0.05 } },
-    { cat: 'Terminal', name: 'Green Screen Glitch', p: { tint: 1, scanlines: 0.8, softness: 0.15, maskType: 1, maskScale: 0.15, phosphor: 0.2, glow: 0.6, postGlow: 0.4, curve: 0.2, vignette: 1, flicker: 0.35, persistence: 0.45, contrast: 1.2, gain: 1.1, sharpen: 0.4, grain: 0.15, tear: 0.25, shake: 0.2, roll: 0, dropout: 0.2, dropStyle: 2, headSwitch: 0.3, hum: 0.2, rf: 0.08, sync: 0.3, bend: 0.2 } },
-    { cat: 'Terminal', name: 'Amber Monitor', p: { tint: 2, scanlines: 0.85, softness: 0.15, maskType: 1, maskScale: 0.15, phosphor: 0.15, glow: 0.5, postGlow: 0.3, curve: 0.3, vignette: 0.8, flicker: 0.15, persistence: 0.5, contrast: 1.1, gain: 1.05, sharpen: 0.25, grain: 0.06, dropout: 0, headSwitch: 0, hum: 0.05, echo: 0 } },
-    { cat: 'Terminal', name: 'Paper White', p: { tint: 3, scanlines: 0.7, softness: 0.2, maskType: 1, maskScale: 0.15, phosphor: 0.15, glow: 0.4, postGlow: 0.25, curve: 0.25, vignette: 0.7, flicker: 0.1, persistence: 0.2, contrast: 1.2, sharpen: 0.3, grain: 0.05, dropout: 0, headSwitch: 0, echo: 0 } },
+    { cat: 'Terminal', name: 'Terminal Glow', p: { scanlines: 0.8, softness: 0.1, maskScale: 0.2, phosphor: 0.2, glow: 0.55, postGlow: 0.35, halation: 0, spectral: 0, curve: 0.15, vignette: 1, flicker: 0.2, persistence: 0.3, bleed: 0.1, rgbSplit: 0, conv: 0, contrast: 1.15, gain: 1.1, sharpen: 0.3, film: 0.05, overscan: 0.05 } },
+    { cat: 'Terminal', name: 'Green Screen Glitch', p: { tint: 1, scanlines: 0.8, softness: 0.15, maskScale: 0.2, phosphor: 0.2, glow: 0.6, postGlow: 0.4, curve: 0.2, vignette: 1, flicker: 0.35, persistence: 0.45, contrast: 1.2, gain: 1.1, sharpen: 0.4, grain: 0.15, tear: 0.25, shake: 0.2, dropout: 0.2, dropStyle: 2, headSwitch: 0.3, hum: 0.2, rf: 0.08, sync: 0.3, bend: 0.2 } },
+    { cat: 'Terminal', name: 'Amber Monitor', p: { tint: 2, scanlines: 0.85, softness: 0.15, maskScale: 0.2, phosphor: 0.15, glow: 0.5, postGlow: 0.3, curve: 0.3, vignette: 0.8, flicker: 0.15, persistence: 0.5, contrast: 1.1, gain: 1.05, sharpen: 0.25 } },
+    { cat: 'Terminal', name: 'Paper White', p: { tint: 3, scanlines: 0.7, softness: 0.2, maskScale: 0.2, phosphor: 0.15, glow: 0.4, postGlow: 0.25, curve: 0.25, vignette: 0.7, flicker: 0.1, persistence: 0.2, contrast: 1.2, sharpen: 0.3 } },
+
+    { cat: 'Camera', name: 'Rainbow Grille', p: { maskType: 1, maskScale: 0.45, phosphor: 0.7, scanlines: 0.5, softness: 0.35, rainbow: 0.45, moire: 0.1, moirePitch: 0.08, moireAngle: 4, moireRings: 0.3, glow: 0.35, postGlow: 0.2, halation: 0.3, contrast: 0.95, spectral: 0.2, curve: 0.3, fisheye: 0.25, vignette: 0.7, bleed: 0.4, rgbSplit: 0.12, temp: -0.35, shHue: 190, shAmt: 0.45, hiHue: 50, hiAmt: 0.25, sat: 1.2, film: 0.15 } },
+    { cat: 'Camera', name: 'Phone Off Screen', p: { maskScale: 0.3, phosphor: 0.6, rainbow: 0.45, moire: 0.2, moirePitch: 0.2, moireRings: 0.75, moireAngle: 1, halation: 0.55, glow: 0.55, postGlow: 0.3, softness: 0.55, sharpen: 0, bleed: 0.5, rgbSplit: 0.15, conv: 0.25, temp: 0.25, hiHue: 15, hiAmt: 0.3, lift: 0.04, vignette: 0.75, curve: 0.1, film: 0.2, filmVar: 0.5 } },
     { cat: 'Camera', name: "Camcorder '94", p: { shake: 0.15, bleed: 0.6, chroma: 0.9, grain: 0.35, headSwitch: 0.55, sharpen: 0.45, dropout: 0.12, hum: 0.12, scanlines: 0.35, phosphor: 0.2, curve: 0.05, glow: 0.2, halation: 0.15, rgbSplit: 0.1, hueDrift: 0.05, echo: 0.15 } },
-    { cat: 'Camera', name: 'Filmed Off TV', p: { capture: 0.7, shutter: 48, refresh: 59.94, pulseContrast: 0.8, moire: 0.35, rainbow: 0.15, curve: 0.55, glow: 0.45, phosphor: 0.8, maskScale: 0.55, scanlines: 0.7, conv: 0.3, spectral: 0.25, overscan: 0.2, persistence: 0.3, maskType: 0 } },
+    { cat: 'Camera', name: 'Filmed Off TV', p: { capture: 0.7, shutter: 48, refresh: 59.94, pulseContrast: 0.8, moire: 0.35, rainbow: 0.25, curve: 0.55, glow: 0.45, phosphor: 0.8, maskScale: 0.39, scanlines: 0.7, conv: 0.3, spectral: 0.25, overscan: 0.2, persistence: 0.3, maskType: 0 } },
     { cat: 'Camera', name: 'Rolling Shutter', p: { capture: 1, shutter: 250, refresh: 60, pulseContrast: 1.4, bandAngle: 12, readout: 0.4, persistence: 0.35, curve: 0.35, phosphor: 0.7, glow: 0.35 } },
+    { cat: 'Camera', name: '16mm Print', p: { phosphor: 0, scanlines: 0, curve: 0, vignette: 0.55, conv: 0, bleed: 0.1, film: 0.6, filmSize: 0.6, filmColor: 0.45, filmVar: 0.7, dust: 0.45, weave: 0.5, halation: 0.35, glow: 0.2, temp: 0.15, lift: 0.04, contrast: 1.1, sat: 0.9, overscan: 0 } },
     { cat: 'Camera', name: 'Night Shift', p: { chroma: 0.15, gain: 1.3, grain: 0.55, rf: 0.15, sharpen: 0.6, scanlines: 0.5, hum: 0.35, shake: 0.05, contrast: 1.3, curve: 0.2, glow: 0.3, flicker: 0.2, bleed: 0.2 } },
+
     { cat: 'TV', name: 'Living Room Tube', p: { maskType: 0, curve: 0.45, glow: 0.35, halation: 0.3, bleed: 0.45, scanlines: 0.55, phosphor: 0.6, conv: 0.2, spectral: 0.15, overscan: 0.15 } },
-    { cat: 'TV', name: 'Broadcast Monitor', p: { maskType: 1, maskScale: 0.2, phosphor: 0.65, scanlines: 0.85, softness: 0.05, bleed: 0.1, sharpen: 0.35, curve: 0.1, glow: 0.15, conv: 0.05, grain: 0.05, dropout: 0, hum: 0, headSwitch: 0, shake: 0, rf: 0, echo: 0 } },
-    { cat: 'TV', name: 'Arcade Cabinet', p: { maskType: 2, maskScale: 0.6, phosphor: 0.8, scanlines: 0.9, pbloom: 0.6, glow: 0.5, halation: 0.25, curve: 0.6, chroma: 1.35, gain: 1.15, spectral: 0.2, headSwitch: 0, dropout: 0, grain: 0.05 } },
+    { cat: 'TV', name: 'Broadcast Monitor', p: { maskType: 1, maskScale: 0.23, phosphor: 0.65, scanlines: 0.85, softness: 0.05, bleed: 0.1, sharpen: 0.35, curve: 0.1, glow: 0.15, conv: 0.05, film: 0 } },
+    { cat: 'TV', name: 'Arcade Cabinet', p: { maskType: 2, maskScale: 0.4, phosphor: 0.8, scanlines: 0.9, pbloom: 0.6, glow: 0.5, halation: 0.25, curve: 0.6, chroma: 1.35, gain: 1.15, spectral: 0.2 } },
+    { cat: 'TV', name: 'Big Pixel Max', p: { maskType: 1, maskScale: 1, phosphor: 1.5, scanlines: 0.9, softness: 0.1, pbloom: 0.7, glow: 0.6, halation: 0.3, curve: 0.35, vignette: 0.5, rainbow: 0.35, moireAngle: 2, chroma: 1.3, gain: 1.25 } },
     { cat: 'TV', name: 'Late Night Ad', p: { chroma: 1.6, hueDrift: 0.15, bleed: 0.7, rgbSplit: 0.25, halation: 0.5, postGlow: 0.4, glow: 0.4, sharpen: 0.5, echo: 0.3, scanlines: 0.4, curve: 0.3, tear: 0.05 } },
     { cat: 'TV', name: 'Pastel Dream', p: { chroma: 0.85, glow: 0.8, postGlow: 0.6, spectral: 0.5, halation: 0.45, softness: 0.7, bright: 0.05, contrast: 0.85, scanlines: 0.3, hueDrift: 0.3, curve: 0.35 } },
-    { cat: 'TV', name: 'Hot Screen', p: { flash: 0.35, flicker: 0.35, glow: 0.6, spectral: 0.6, pbloom: 0.8, contrast: 1.35, chroma: 1.5, scanlines: 0.7, phosphor: 0.7, maskScale: 0.45 } },
+    { cat: 'TV', name: 'Hot Screen', p: { flash: 0.35, flicker: 0.35, glow: 0.6, spectral: 0.6, pbloom: 0.8, contrast: 1.35, chroma: 1.5, scanlines: 0.7, phosphor: 0.7, maskScale: 0.35 } },
+
+    { cat: 'Color', name: 'Teal Night', p: { shHue: 190, shAmt: 0.55, hiHue: 40, hiAmt: 0.3, temp: -0.3, sat: 1.25, halation: 0.35, glow: 0.4, lift: 0.02 } },
+    { cat: 'Color', name: 'Cross Processed', p: { cross: 0.85, sat: 1.35, contrast: 1.15, lift: 0.05, hiHue: 60, hiAmt: 0.2, film: 0.2 } },
+    { cat: 'Color', name: 'Duotone', p: { gmap: 0.9, shHue: 255, hiHue: 25, contrast: 1.15, film: 0.15 } },
+    { cat: 'Color', name: 'Grunge Zine', p: { grunge: 0.85, poster: 0.35, contrast: 1.35, crush: 0.3, film: 0.45, filmSize: 0.5, filmVar: 0.8, dust: 0.4, sat: 0.8, sharpen: 0.6 } },
+    { cat: 'Color', name: 'Solar Flare', p: { solar: 0.6, hue: 25, glow: 0.55, spectral: 0.4, sat: 1.3 } },
+    { cat: 'Color', name: 'Bleach Bypass', p: { sat: 0.4, contrast: 1.45, lift: -0.04, temp: -0.1, film: 0.3, filmColor: 0, halation: 0.1 } },
+
+    { cat: 'Glitch', name: 'Datamosh Bloom', p: { mosh: 1, moshDrift: 0.5, moshGain: 2, moshRefresh: 0.03, moshResid: 0.25, moshBlock: 0.45, compress: 0.2, chroma: 1.3 } },
+    { cat: 'Glitch', name: 'Macroblock Rot', p: { compress: 0.8, blockGlitch: 0.5, crush: 0.25, mosh: 0.35, moshRefresh: 0.2, sat: 1.2 } },
+    { cat: 'Glitch', name: 'Pixel Melt', p: { smear: 0.75, smearThresh: 0.45, mosh: 0.5, moshDrift: 0.7, moshRefresh: 0.05, hueDrift: 0.3, glow: 0.4 } },
+    { cat: 'Glitch', name: 'Slice & Dice', p: { slices: 0.8, blockGlitch: 0.35, chanSwap: 4, rgbSplit: 0.4, tear: 0.2 } },
     { cat: 'Glitch', name: 'Bent Circuit', p: { bend: 0.6, bendFreq: 2.2, bendQ: 9, bendBoost: 18, bendMotion: 0.35, bendFb: 0.08, chroma: 1.4, scanlines: 0.5 } },
     { cat: 'Glitch', name: 'Loose Cable', p: { tear: 0.55, shake: 0.5, dropout: 0.4, dropStyle: 4, echo: 0.5, hum: 0.45, rf: 0.3, headSwitch: 0.6, rgbSplit: 0.3, sync: 0.5 } },
     { cat: 'Glitch', name: 'Overcooked', p: { sharpen: 1, contrast: 2, chroma: 2.3, gain: 1.4, bleed: 0.9, grain: 0.6, halation: 0.8, postGlow: 0.5, rgbSplit: 0.4, glow: 0.4, bend: 0.15 } },
@@ -155,8 +235,9 @@
     { cat: 'Glitch', name: 'Lost Sync', p: { roll: 0.45, sync: 0.8, tear: 0.4, shake: 0.3, hum: 0.5, headSwitch: 0.5, flicker: 0.3 } },
     { cat: 'Glitch', name: 'Chroma Storm', p: { hueDrift: 1, chroma: 2.2, rgbSplit: 0.6, bleed: 1, waves: 0.4, waveColor: 1, waveBlend: 3, waveCount: 80, conv: 0.6, convAngle: 45 } },
     { cat: 'Glitch', name: 'Haunted Tape', p: { dropout: 0.35, dropStyle: 0, grain: 0.7, rf: 0.35, chroma: 0.4, echo: 0.6, hum: 0.4, shake: 0.25, headSwitch: 0.8, topLine: 0.5, flicker: 0.2, contrast: 1.2, bright: -0.05 } },
-    { cat: 'Glitch', name: 'Rainbow Moiré', p: { capture: 0.6, moire: 0.7, rainbow: 0.9, spectral: 0.7, maskScale: 0.8, phosphor: 0.9, maskType: 3, curve: 0.5, glow: 0.4 } },
   ];
 
-  window.AtlasParams = { MASTER, GROUPS, DEFAULTS, PRESETS };
+  const CATS = ['Terminal', 'Camera', 'TV', 'Color', 'Glitch'];
+
+  window.AtlasParams = { MASTER, MACROS, GROUPS, DEFAULTS, BY_KEY, PRESETS, CATS };
 })();
