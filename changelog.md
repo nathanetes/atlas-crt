@@ -1,6 +1,41 @@
 # Changelog
 
-## Unreleased
+## v2.0.0-beta
+
+A rebuilt renderer. The tube now works in linear light, so beams, phosphors and glow add up the way light does on a real screen, and Atlas CRT can now carry the picture over a real composite signal, onto tape, and through an interlaced raster. The factory looks are new to match.
+
+Try it at https://atlas-crt.nathanetes.com
+
+### Added
+
+- **Composite and S-Video.** Signal Path in Color Signal encodes the picture onto a 3.58 MHz color subcarrier and decodes it again the way an inexpensive TV did. Fine detail turns into rainbow cross-color, and color edges get crawling dots. S-Video keeps color on its own wire, so it's softer but clean. The approach follows Cathode Retro by DeadlyRedCube.
+- **Luma Bandwidth** in Color Signal: limits sharpness to S-VHS (about 400 TV lines), broadcast NTSC (330), Betamax (250) or VHS (240). Post Sharpen then rings at the tape's own scale, like a deck's detail enhancer.
+- **480i raster.** 480 lines drawn as two interlaced fields, one per frame. Moving edges comb and detail one line tall flickers (line twitter), as on an interlaced TV.
+- **Tube Gamut** in Screen: P22 · D65 shows color through CRT phosphors with a standard white, P22 · D93 adds the bluish white of many Japanese and consumer sets, and Modern (sRGB) turns it off. P22 · D65 is the new default.
+- **A real camera for moiré.** Rainbow Moiré and Moiré Bands now come from a simulated camera: a sensor with a Bayer color filter photographs the tube, and its flat grid beats against the curved phosphor grid. The fringes cover the whole picture and bend with the glass. Density, Angle and Rings set the camera's pitch, rotation and lens.
+- **New looks:** Tokyo Trinitron and Console on Composite in TV, Green Phosphor in Terminal, and a new **Tape** group with VHS Camcorder, Rental Tape EP, Betamax Archive and S-VHS Master.
+
+### Changed
+
+- **Linear light.** Beams, the phosphor mask, glow and halation are computed in linear light. Edges are smoother, the mask stays visible in bright areas, and glow falls off like light.
+- **Glow** has a long, soft tail from light scattering in the faceplate. Next to large bright areas it lifts the blacks a little, as real glass does.
+- **Persistence** fades per phosphor: red lingers longest and blue fades fastest, so trails behind bright moving things lean red.
+- **Tape grain** runs in horizontal streaks, like real tape noise.
+- **Fine phosphor masks** are anti-aliased exactly, and a light dither keeps dark gradients and glow from banding.
+- **The factory looks are rebuilt** for the new renderer: 33 looks in six groups (TV, Tape, Camera, Terminal, Color, Glitch). Haunted Tape and Late Night Ad moved into Tape. The looks tab now opens on the group of the look you're using.
+
+### Removed
+
+- Nine factory looks: Camcorder '94 (replaced by VHS Camcorder), Green Screen Glitch (replaced by Green Phosphor), Grunge Zine, Hot Screen, Macroblock Rot, Overcooked, Pixel Melt, Slice & Dice and Solar Flare. Every control they used is still there, so you can rebuild them and save them under **mine**.
+
+### Known limitations
+
+- **Saved looks will look different.** They pick up the new renderer, the P22 · D65 gamut and the camera-based moiré. Set Tube Gamut to Modern (sRGB) to get the old colors back.
+- **Looks don't set the raster.** Choose 480i yourself for interlaced footage.
+- **The moiré camera adds a render pass** while Rainbow Moiré or Moiré Bands is above zero. With very large Mask Scale settings the camera's picture gets soft, because a camera that close wouldn't see moiré.
+- **In the fitted preview,** fine masks and moiré are drawn smaller than in the export. Use the 100% view (Z) to see exactly what you'll export.
+
+## v1.2.0-beta
 
 ### Added
 
@@ -9,21 +44,11 @@
 - **Corrupt module:** datamosh with block size, motion gain, drift, keyframes and residual, plus block glitch, slice shift, pixel smear, compression and bit crush.
 - **Grade module** for creative color: hue shift, saturation, temperature, tint, shadow and highlight toning, gradient map, cross process, black level, gamma, solarize, posterize, invert, channel swap and grunge.
 - **Film grain** in the Noise & Film module: size, mono-to-RGB color, shadow-to-highlight response and variation, so it clumps and breathes like film. Also dust and scratches, and gate weave.
-- **Rainbow moiré** in Capture, from a simulated camera: a sensor with a Bayer color filter photographs the tube, and its flat grid beats against the curved phosphor grid, so the fringes cover the whole picture and bend with the glass. Density, angle and rings set the camera's pitch, rotation and lens.
+- **Rainbow moiré** in Capture: the camera sensor beats against the curved grille, with density, angle and rings controls.
 - **Bigger pixels.** Mask Scale goes up to 36px triads, Phosphor goes up to 1.5 where the gaps turn black, and there's a new LO raster (120 lines).
-- **Composite and S-Video** (Signal Path, in Color Signal): a real NTSC encode and decode, so fine detail turns into rainbow cross-color and color edges get dot crawl. After Cathode Retro by DeadlyRedCube.
-- **Luma Bandwidth** for S-VHS, broadcast, Betamax and VHS, with deck sharpening that rings at the tape's own scale.
-- **480i raster:** two interlaced fields, with combing on motion and line twitter.
-- **Tube Gamut** in Screen: P22 phosphors with a D65 or bluish D93 white point.
-- **33 factory looks in six groups:** TV, Tape (new), Camera, Terminal, Color and Glitch, built for the new renderer.
+- **14 new looks:** Rainbow Grille (it replaces Rainbow Moiré), Phone Off Screen, 16mm Print, Big Pixel Max, a new Color group (Teal Night, Cross Processed, Duotone, Grunge Zine, Solar Flare, Bleach Bypass), and Datamosh Bloom, Macroblock Rot, Pixel Melt and Slice & Dice in Glitch.
 
 ### Changed
-
-- The tube now renders in linear light: beams, phosphor mask, glow and halation add up as light does on a real screen, and edges are smoother.
-- Glow has a long, soft tail from light scattering in the glass.
-- Persistence fades per phosphor, so trails behind bright moving things lean red.
-- Tape grain runs in horizontal streaks, like real tape noise.
-- A light dither keeps dark gradients and glow from banding.
 
 - The interface is simpler: a looks tab (looks, macros, render settings, save) and an adjust tab (automation, master, modules). Raster and output size moved from the header into the looks tab.
 - The defaults are cleaner: no dropouts, hum, echo, shake or head-switch band unless a look adds them.
