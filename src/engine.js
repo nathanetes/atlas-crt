@@ -1,6 +1,7 @@
-// Atlas CRT WebGL2 engine: source upload -> signal raster -> glow pyramids -> screen.
+// Atlas CRT WebGL2 engine: source upload -> (datamosh) -> signal raster -> glow pyramids -> screen.
 (function () {
   const RASTER = {
+    LO: { lines: 120, wide: 1.5 },
     SD: { lines: 240, wide: 1.5 },
     HI: { lines: 480, wide: 1.25 },
     FULL: { lines: 0, wide: 1 },
@@ -18,18 +19,19 @@
       this.vao = gl.createVertexArray();
       const S = window.AtlasShaders;
       this.progs = {
+        mosh: this._program(S.VERT, S.MOSH),
         signal: this._program(S.VERT, S.SIGNAL),
         copy: this._program(S.VERT, S.COPY),
         blur: this._program(S.VERT, S.BLUR),
         screen: this._program(S.VERT, S.SCREEN),
       };
-      this.srcTex = this._texture(false);
+      this.srcTex = this._texture(true);
       this.quality = 'SD';
       this.source = null;
       this.srcW = 0; this.srcH = 0;
       this.outW = 0; this.outH = 0;
       this.expW = 0; this.expH = 0; this.viewW = 0;
-      this.ping = 0;
+      this.ping = 0; this.lowPing = 0; this.moshPing = 0; this.moshFresh = true;
       this.maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
     }
 
@@ -82,6 +84,19 @@
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       return { tex, fbo, w, h };
+    }
+
+    _mips(t) {
+      this.gl.bindTexture(this.gl.TEXTURE_2D, t.tex);
+      this.gl.generateMipmap(this.gl.TEXTURE_2D);
+    }
+
+    // alpha 0 marks a datamosh buffer as empty, so the first moshed frame starts clean
+    _clear(t) {
+      const gl = this.gl;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
     }
 
     _free(t) {
@@ -140,8 +155,12 @@
       // SD/HI line counts are set on the short side, so portrait clips keep the same pitch
       const lines = r.lines ? Math.round(r.lines / Math.min(1, aspect)) : Math.min(this.srcH, this.expH);
       const width = Math.min(this.maxTex, Math.round(lines * aspect * r.wide));
-      [this.sig, this.A, this.B].forEach(set => set && set.forEach(t => this._free(t)));
-      this.sig = [this._target(width, lines, true), this._target(width, lines, true)];
+      [this.sig, this.low, this.mosh, this.A, this.B].forEach(set => set && set.forEach(t => this._free(t)));
+      const pair = () => [this._target(width, lines, true), this._target(width, lines, true)];
+      this.sig = pair();
+      this.low = pair();   // this frame's and last frame's source at raster size, for motion
+      this.mosh = pair();  // datamosh feedback
+      this.moshFresh = true;
       this.A = [this._target(this.outW / 4, this.outH / 4), this._target(this.outW / 4, this.outH / 4)];
       this.B = [this._target(this.outW / 8, this.outH / 8), this._target(this.outW / 8, this.outH / 8)];
     }
@@ -155,6 +174,7 @@
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
+      gl.generateMipmap(gl.TEXTURE_2D);
       this.srcDirty = false;
       return true;
     }
@@ -199,9 +219,28 @@
 
       const cur = this.sig[this.ping], prev = this.sig[1 - this.ping];
       U.uRes = [cur.w, cur.h];
-      this._pass(this.progs.signal, cur, U, { uSrc: this.srcTex, uPrev: prev.tex });
-      gl.bindTexture(gl.TEXTURE_2D, cur.tex);
-      gl.generateMipmap(gl.TEXTURE_2D);
+
+      // keep the last two source frames at raster size so datamosh can estimate motion
+      const lowCur = this.low[this.lowPing], lowPrev = this.low[1 - this.lowPing];
+      this._pass(this.progs.copy, lowCur, {}, { uTex: this.srcTex });
+      this._mips(lowCur);
+      this.lowPing = 1 - this.lowPing;
+
+      let signalSrc = this.srcTex, srcRes = [this.srcW, this.srcH];
+      if (params.mosh > 0.001) {
+        if (this.moshFresh) this.mosh.forEach((t) => this._clear(t));
+        this.moshFresh = false;
+        const mOut = this.mosh[this.moshPing], mPrev = this.mosh[1 - this.moshPing];
+        this._pass(this.progs.mosh, mOut, U, { uCur: lowCur.tex, uPrev: lowPrev.tex, uMosh: mPrev.tex });
+        this._mips(mOut);
+        this.moshPing = 1 - this.moshPing;
+        signalSrc = mOut.tex; srcRes = [mOut.w, mOut.h];
+      } else {
+        this.moshFresh = true;
+      }
+      U.uSrcRes = srcRes;
+      this._pass(this.progs.signal, cur, U, { uSrc: signalSrc, uPrev: prev.tex });
+      this._mips(cur);
 
       this._pass(this.progs.copy, this.A[0], {}, { uTex: cur.tex });
       this._blur(this.A, 1.2, 1);
