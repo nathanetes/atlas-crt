@@ -57,7 +57,7 @@ Each module has its own on/off switch and reset.
 
 ## Looks
 
-33 factory looks in six groups, built for the linear-light renderer:
+33 factory looks in six groups, built for the linear-light renderer, plus **Init** at the top of TV: every effect off, a blank slate to build your own look from.
 
 - **TV:** Living Room Tube, Broadcast Monitor, Tokyo Trinitron, Arcade Cabinet, Console on Composite, Big Pixel Max, Pastel Dream
 - **Tape:** VHS Camcorder, Rental Tape EP, Betamax Archive, S-VHS Master, Haunted Tape, Late Night Ad

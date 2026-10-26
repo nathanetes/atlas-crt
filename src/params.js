@@ -197,8 +197,13 @@
   const BY_KEY = {};
   ALL.forEach(c => { DEFAULTS[c.k] = c.d; BY_KEY[c.k] = c; });
 
+  // Init: a blank slate to build a look from. Every control that has a neutral value (n, what it
+  // takes when its module is switched off) is set to it; the rest only shape effects that are off.
+  const INIT = Object.fromEntries(ALL.filter(c => c.n !== undefined).map(c => [c.k, c.n]));
+
   // Factory looks. Each is a full look laid over DEFAULTS, in a category from CATS.
   const PRESETS = [
+    { cat: 'TV', name: 'Init', p: INIT },
     // TV: sets in a room, from studio monitors to arcade cabinets
     { cat: 'TV', name: 'Living Room Tube', p: { composite: 2, lumaBW: 2, maskType: 0, maskScale: 0.3, phosphor: 0.6, scanlines: 0.55, curve: 0.45, glow: 0.35, halation: 0.2, bleed: 0.3, conv: 0.15, spectral: 0.1, overscan: 0.12 } },
     { cat: 'TV', name: 'Broadcast Monitor', p: { composite: 1, maskType: 1, maskScale: 0.2, phosphor: 0.6, scanlines: 0.8, softness: 0.1, sharpen: 0.3, bleed: 0.05, curve: 0.08, glow: 0.15, conv: 0.03, rgbSplit: 0, overscan: 0.04 } },
