@@ -320,8 +320,7 @@
     const cur = PRESETS.find((p) => p.name === state.look);
     if (cur) cat = cur.cat;
   } else {
-    applyLook(PRESETS.find((p) => p.name === 'Terminal Glow'));
-  }
+    applyLook(PRESETS.find((p) => p.name === 'Init') || { name: null, p: {} });
   const q = store('atlas.quality');
   if (q) document.querySelector(`#quality button[data-q="${q}"]`)?.click();
   const o = store('atlas.out');
