@@ -1,10 +1,6 @@
 # Changelog
 
-## v1.2.0-beta
-
-Film grain, datamosh and corruption, creative color, rainbow moiré, bigger pixels and automation, in a simpler control panel.
-
-Try it at https://atlas-crt.nathanetes.com
+## Unreleased
 
 ### Added
 
@@ -13,11 +9,21 @@ Try it at https://atlas-crt.nathanetes.com
 - **Corrupt module:** datamosh with block size, motion gain, drift, keyframes and residual, plus block glitch, slice shift, pixel smear, compression and bit crush.
 - **Grade module** for creative color: hue shift, saturation, temperature, tint, shadow and highlight toning, gradient map, cross process, black level, gamma, solarize, posterize, invert, channel swap and grunge.
 - **Film grain** in the Noise & Film module: size, mono-to-RGB color, shadow-to-highlight response and variation, so it clumps and breathes like film. Also dust and scratches, and gate weave.
-- **Rainbow moiré** in Capture: the camera sensor beats against the curved grille, with density, angle and rings controls.
+- **Rainbow moiré** in Capture, from a simulated camera: a sensor with a Bayer color filter photographs the tube, and its flat grid beats against the curved phosphor grid, so the fringes cover the whole picture and bend with the glass. Density, angle and rings set the camera's pitch, rotation and lens.
 - **Bigger pixels.** Mask Scale goes up to 36px triads, Phosphor goes up to 1.5 where the gaps turn black, and there's a new LO raster (120 lines).
-- **14 new looks:** Rainbow Grille (it replaces Rainbow Moiré), Phone Off Screen, 16mm Print, Big Pixel Max, a new Color group (Teal Night, Cross Processed, Duotone, Grunge Zine, Solar Flare, Bleach Bypass), and Datamosh Bloom, Macroblock Rot, Pixel Melt and Slice & Dice in Glitch.
+- **Composite and S-Video** (Signal Path, in Color Signal): a real NTSC encode and decode, so fine detail turns into rainbow cross-color and color edges get dot crawl. After Cathode Retro by DeadlyRedCube.
+- **Luma Bandwidth** for S-VHS, broadcast, Betamax and VHS, with deck sharpening that rings at the tape's own scale.
+- **480i raster:** two interlaced fields, with combing on motion and line twitter.
+- **Tube Gamut** in Screen: P22 phosphors with a D65 or bluish D93 white point.
+- **33 factory looks in six groups:** TV, Tape (new), Camera, Terminal, Color and Glitch, built for the new renderer.
 
 ### Changed
+
+- The tube now renders in linear light: beams, phosphor mask, glow and halation add up as light does on a real screen, and edges are smoother.
+- Glow has a long, soft tail from light scattering in the glass.
+- Persistence fades per phosphor, so trails behind bright moving things lean red.
+- Tape grain runs in horizontal streaks, like real tape noise.
+- A light dither keeps dark gradients and glow from banding.
 
 - The interface is simpler: a looks tab (looks, macros, render settings, save) and an adjust tab (automation, master, modules). Raster and output size moved from the header into the looks tab.
 - The defaults are cleaner: no dropouts, hum, echo, shake or head-switch band unless a look adds them.
