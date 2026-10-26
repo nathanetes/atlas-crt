@@ -96,3 +96,5 @@ Atlas CRT needs WebGL2, which current Chrome, Edge, Safari and Firefox all suppo
 The interface uses the Nathan Etes Terminal design system and the [VT323](https://fonts.google.com/specimen/VT323) typeface from Google Fonts.
 
 CRT Effect made with Claude Ultracode ( because i do not know how to code )
+
+plus **Init** at the top of TV: every effect off, a blank slate to build your own look from. The app opens on Init the first time; after that it reopens on whatever you were last using.
