@@ -1,6 +1,7 @@
 // Atlas CRT shader sources, part 2: the screen pass. It draws the tube at output
 // resolution (geometry, beams, phosphor mask, glow, the camera filming it), then the
-// creative grade and the film stock on top. The camera sensor pass (SENSOR) shares it.
+// creative grade and the film stock on top. The camera's sensor and develop passes (SENSOR,
+// DEMOSAIC) share it.
 (function () {
   const S = window.AtlasShaders;
 
@@ -219,17 +220,20 @@ vec3 gamutOf(vec3 col) {
 // and blue sites form grids one triad apart: where those nearly line up with the triads they beat
 // into broad rainbow bands that curve with the tube face and the lens. Without the filter (Moiré
 // only) the beat is finer and mostly in brightness.
-uniform sampler2D uSensor;
+// The camera always shoots at export resolution, so the fitted preview shows the same photo,
+// scaled down, instead of a different moiré from a coarser sensor.
+uniform sampler2D uSensor, uCamera;
 uniform vec2 uSensorRes;    // photosites across and down, centred on the picture
-uniform float uPitchS;      // photosite pitch in output pixels
-vec2 sensorToOut(vec2 s) {
+uniform vec2 uExpRes;       // export size in pixels: the camera's frame of reference
+uniform float uPitchS;      // photosite pitch in export pixels
+vec2 sensorToExp(vec2 s) {
   vec2 q = rot(-radians(u_moireAngle)) * s * uPitchS;
-  vec2 n = q / uOut.y;
-  return uOut * 0.5 + q * (1.0 + u_moireRings * 0.25 * dot(n, n));
+  vec2 n = q / uExpRes.y;
+  return uExpRes * 0.5 + q * (1.0 + u_moireRings * 0.25 * dot(n, n));
 }
-vec2 outToSensor(vec2 fc) {
-  vec2 q = fc - uOut * 0.5;
-  vec2 n = q / uOut.y;
+vec2 expToSensor(vec2 e) {
+  vec2 q = e - uExpRes * 0.5;
+  vec2 n = q / uExpRes.y;
   q /= 1.0 + u_moireRings * 0.25 * dot(n, n);   // inverse of the lens, close enough for small bends
   return rot(radians(u_moireAngle)) * q / uPitchS;
 }
@@ -240,35 +244,43 @@ float bayerPlane(vec2 x, vec2 o, int ch) {
   ivec2 s = ivec2(b * 2.0 + o);
   return mix(mix(site(s)[ch], site(s + ivec2(2, 0))[ch], f.x), mix(site(s + ivec2(0, 2))[ch], site(s + ivec2(2, 2))[ch], f.x), f.y);
 }
-// what the camera recorded at an output pixel: R on even/even sites, B on odd/odd, G on the rest
-vec3 cameraView(vec2 fc, float bayer) {
-  vec2 x = outToSensor(fc) + uSensorRes * 0.5 - 0.5;   // in photosite-centre units
-  vec3 full = texture(uSensor, (x + 0.5) / uSensorRes).rgb;
+// the developed photo at an output pixel, sampled with mipmaps so smaller views stay smooth
+vec3 cameraView(vec2 fc) {
+  vec2 s = expToSensor(fc * uExpRes / uOut);
+  return texture(uCamera, (s + uSensorRes * 0.5) / uSensorRes).rgb;
+}
+
+#ifdef DEMOSAIC
+// develop the raw sensor: rebuild colour from the Bayer mosaic (R on even/even sites, B on odd/odd,
+// G on the rest), blended with an unfiltered sensor by how much of the camera is Rainbow
+void main() {
+  vec2 x = floor(gl_FragCoord.xy);
   vec3 mosaic = vec3(bayerPlane(x, vec2(0.0), 0),
                      0.5 * (bayerPlane(x, vec2(1.0, 0.0), 1) + bayerPlane(x, vec2(0.0, 1.0), 1)),
                      bayerPlane(x, vec2(1.0), 2));
-  return mix(full, mosaic, bayer);
+  float cam = max(u_moire, u_rainbow);
+  o = vec4(mix(site(ivec2(x)), mosaic, clamp(u_rainbow / max(cam, 1e-4), 0.0, 1.0)), 1.0);
 }
-
-#ifdef SENSOR
+#elif defined(SENSOR)
 // the sensor pass: each photosite records the tube's light averaged over its area. The mask is
 // averaged exactly (phosphorMask with a photosite-wide footprint); the beams, whose scanlines are
 // coarser, are averaged over three points down the photosite.
 bool inFrame(vec2 uv) { return all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0))); }
 void main() {
   vec2 s = floor(gl_FragCoord.xy) + 0.5 - uSensorRes * 0.5;
-  vec2 uvc = sensorToOut(s) / uOut;
+  vec2 uvc = sensorToExp(s) / uExpRes;
   if (!inFrame(uvc)) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
   vec3 b = vec3(0.0);
   for (int j = 0; j < 3; j++) {
-    vec2 uv = sensorToOut(s + vec2(0.0, (float(j) + 0.5) / 3.0 - 0.5)) / uOut;
+    vec2 uv = sensorToExp(s + vec2(0.0, (float(j) + 0.5) / 3.0 - 0.5)) / uExpRes;
     if (!inFrame(uv)) continue;
     Face F = faceAt(uv);
     b += beamLight(F) * F.inside;
   }
   b /= 3.0;
   Face C = faceAt(uvc);
-  vec3 light = b * phosphorMask(C, b, uPitchS) + glowLight(C) * C.inside;
+  // the mask footprint is one photosite, in this canvas's pixels
+  vec3 light = b * phosphorMask(C, b, uPitchS * uScale) + glowLight(C) * C.inside;
   o = vec4(gamutOf(light), 1.0);
 }
 #else
@@ -280,9 +292,9 @@ void main() {
   float r2 = F.r2, inside = F.inside;
   vec3 col = gamutOf(tubeLight(F) + glowLight(F));
 
-  // seen through the camera: Moiré and Rainbow set how much, Rainbow how much of it is the Bayer mosaic
+  // seen through the camera: Moiré and Rainbow set how much (the developed photo already holds the Bayer mix)
   float cam = max(u_moire, u_rainbow);
-  if (cam > 0.001) col = mix(col, cameraView(gl_FragCoord.xy, clamp(u_rainbow / cam, 0.0, 1.0)), cam);
+  if (cam > 0.001) col = mix(col, cameraView(gl_FragCoord.xy), cam);
 
   // back to display values: the camera, lens and grade below are tuned on these.
   // TUBE_DRIVE is the set's contrast drive: 1.0 shows the signal's true level, 1.3 keeps
@@ -404,4 +416,5 @@ void main() {
 
   // the camera sensor pass is the same source with its own main()
   S.SENSOR = S.SCREEN.replace('#version 300 es\n', '#version 300 es\n#define SENSOR\n');
+  S.DEMOSAIC = S.SCREEN.replace('#version 300 es\n', '#version 300 es\n#define DEMOSAIC\n');
 })();
