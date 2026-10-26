@@ -170,11 +170,15 @@
       ],
     },
     {
-      id: 'capture', title: 'Capture', hint: 'A camera filming the tube: rainbow moiré bands and rings across the whole picture, plus the scan pulse. Coverage carries the bands into dark areas.',
+      id: 'capture', title: 'Capture', hint: 'A camera filming the tube: its sensor grid beats against the screen grid, and the moiré bends with the glass and the lens. Moiré Scale goes from single-pixel to chunky; Coverage is room light, so the moiré reaches dark areas. Plus the scan pulse.',
       controls: [
         amt('rainbow', 'Rainbow Moiré'),
         amt('moire', 'Moiré Bands'),
-        { k: 'moireCover', l: 'Moiré Coverage', min: 0, max: 1, step: 0.01, d: 0.6, u: 'lit areas → whole frame' },
+        { k: 'moireScale', l: 'Moiré Scale', min: 0, max: 1, step: 0.01, d: 0.25, u: 'single pixels → chunky' },
+        { k: 'moireGrid', l: 'Moiré Grid', d: 0, opts: pick(['Pixel Grid', 'Aperture Grille', 'Slot Mask', 'Delta Dot', 'Same as Screen']) },
+        { k: 'moireCells', l: 'Pixel Visibility', min: 0, max: 1, step: 0.01, d: 0.5 },
+        { k: 'moireColor', l: 'Moiré Color', min: 0, max: 1, step: 0.01, d: 0.3 },
+        { k: 'moireCover', l: 'Moiré Coverage', min: 0, max: 1, step: 0.01, d: 0.4, u: 'room light: lit areas → whole frame' },
         { k: 'moirePitch', l: 'Moiré Density', min: 0, max: 1, step: 0.01, d: 0.35 },
         { k: 'moireAngle', l: 'Moiré Angle', min: -45, max: 45, step: 0.1, d: 0, u: '°' },
         { k: 'moireRings', l: 'Moiré Rings', min: -1, max: 1, step: 0.01, d: 0.2 },
@@ -239,9 +243,10 @@
     { cat: 'Tape', name: 'Late Night Ad', p: { composite: 2, lumaBW: 2, chroma: 1.6, hueDrift: 0.15, bleed: 0.7, rgbSplit: 0.2, halation: 0.5, postGlow: 0.4, glow: 0.4, sharpen: 0.5, echo: 0.3, scanlines: 0.4, curve: 0.3, tear: 0.05 } },
 
     // Camera: the tube seen through a lens and a sensor
-    { cat: 'Camera', name: 'Phone Off Screen', p: { maskType: 1, maskScale: 0.1, phosphor: 0.8, rainbow: 0.6, moire: 0.25, moireCover: 0.7, moirePitch: 0.3, moireAngle: 1, moireRings: 0.7, moireDrift: 0.3, curve: 0.2, glow: 0.3, halation: 0.3, softness: 0.4, temp: 0.15, film: 0.1 } },
-    { cat: 'Camera', name: 'Rainbow Grille', p: { maskType: 1, maskScale: 0.08, phosphor: 0.9, rainbow: 0.8, moire: 0.35, moireCover: 0.5, moirePitch: 0.4, moireAngle: 0.5, moireRings: -0.2, curve: 0.3, glow: 0.3, scanlines: 0.5 } },
-    { cat: 'Camera', name: 'Filmed Off TV', p: { capture: 0.7, shutter: 48, refresh: 59.94, pulseContrast: 0.8, rainbow: 0.35, moire: 0.2, moireCover: 0.3, maskType: 0, maskScale: 0.12, phosphor: 0.8, scanlines: 0.7, curve: 0.5, glow: 0.4, conv: 0.25, overscan: 0.15, persistence: 0.3, film: 0.15 } },
+    { cat: 'Camera', name: 'Pixel Moiré', p: { rainbow: 0.85, moire: 0.3, moireScale: 0.07, moireGrid: 2, moireCells: 0.5, moireColor: 0.6, moireCover: 0.5, moirePitch: 0.2, moireAngle: 0, moireRings: 0.05, moireDrift: 0.15, scanlines: 0.6, bleed: 0.3, sharpen: 0.3, rgbSplit: 0.25, grain: 0.1, curve: 0.15, vignette: 0.4, glow: 0.2 } },
+    { cat: 'Camera', name: 'Phone Off Screen', p: { maskType: 1, maskScale: 0.1, phosphor: 0.8, rainbow: 0.6, moire: 0.3, moireGrid: 4, moireCover: 0.3, moirePitch: 0.3, moireAngle: 2, moireRings: 0.35, moireDrift: 0.1, curve: 0.2, glow: 0.3, halation: 0.3, softness: 0.4, temp: 0.15, film: 0.1 } },
+    { cat: 'Camera', name: 'Rainbow Grille', p: { maskType: 1, maskScale: 0.08, phosphor: 0.9, rainbow: 0.85, moire: 0.4, moireGrid: 4, moireCover: 0.2, moirePitch: 0.15, moireAngle: 0.5, moireRings: -0.5, moireDrift: 0.1, curve: 0.3, glow: 0.3, scanlines: 0.5 } },
+    { cat: 'Camera', name: 'Filmed Off TV', p: { capture: 0.7, shutter: 48, refresh: 59.94, pulseContrast: 0.8, rainbow: 0.35, moire: 0.2, moireGrid: 4, moireCover: 0.2, moireDrift: 0.1, maskType: 0, maskScale: 0.12, phosphor: 0.8, scanlines: 0.7, curve: 0.5, glow: 0.4, conv: 0.25, overscan: 0.15, persistence: 0.3, film: 0.15 } },
     { cat: 'Camera', name: 'Rolling Shutter', p: { capture: 1, shutter: 250, refresh: 60, pulseContrast: 1.4, bandAngle: 12, readout: 0.4, persistence: 0.35, curve: 0.35, phosphor: 0.7, glow: 0.35 } },
     { cat: 'Camera', name: '16mm Print', p: { phosphor: 0, scanlines: 0, curve: 0, vignette: 0.55, conv: 0, bleed: 0.1, film: 0.6, filmSize: 0.6, filmColor: 0.45, filmVar: 0.7, dust: 0.45, weave: 0.5, halation: 0.35, glow: 0.2, temp: 0.15, lift: 0.04, contrast: 1.1, sat: 0.9, overscan: 0, gamut: 0 } },
     { cat: 'Camera', name: 'Night Shift', p: { composite: 2, lumaBW: 4, chroma: 0.15, gain: 1.3, grain: 0.55, rf: 0.15, sharpen: 0.6, scanlines: 0.5, hum: 0.35, shake: 0.05, contrast: 1.3, curve: 0.2, glow: 0.3, flicker: 0.2, bleed: 0.2 } },
