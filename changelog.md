@@ -7,12 +7,17 @@
 - **Pre Grade module:** exposure, brightness, contrast, saturation, temperature, tint and hue on the source before it reaches the tube, so the signal, beams and glow all work on the graded picture.
 - **Exposure in Post Grade** (the old Grade module), in stops. Brightness and Contrast moved there from Master, so each grade has exposure, brightness, contrast and color.
 - **Dust Opacity** and **Speck Opacity** in Noise & Film, to make dust, scratches and RF specks fainter without making them rarer.
-- **Moiré Coverage** and **Moiré Drift** in Capture.
+- **Moiré Scale** in Capture: the grid the camera photographs, from single-pixel cells (fine pixel moiré, like a phone filming a screen) up to chunky stripes. It no longer depends on the Screen mask.
+- **Moiré Grid** (Pixel Grid, Aperture Grille, Slot Mask, Delta Dot, or Same as Screen), **Pixel Visibility** (how sharply the grid's cells show), **Moiré Color** (the false color a phone camera boosts), **Moiré Coverage** (room light on the glass) and **Moiré Drift** (the camera breathing, so the fringes crawl).
+- **Pixel Moiré**, a new Camera look: fine rows of colored pixels, after a phone filming a CRT.
 
 ### Changed
 
-- **Moiré is now an overlay on the whole picture.** The simulated camera from v2.0.0-beta only produced moiré where the phosphor mask was on and the picture was lit, so it did nothing from Init and showed as rainbow dots on bright detail. The bands are now drawn across the whole tube face, smooth and independent of the mask. Coverage sets how far they carry into dark areas, and Rings now scales the same way on any aspect ratio. Moiré Angle defaults to 0 (horizontal bands).
-- Phone Off Screen, Rainbow Grille and Filmed Off TV are retuned for the new moiré.
+- **Moiré works from any starting point and across the whole picture.** The simulated camera from v2.0.0-beta photographed the Screen's phosphor mask, so with Phosphor at 0 (as in Init) it produced nothing, and it only showed where the picture was lit. The camera now photographs a grid of its own, so moiré works with the mask off, and Coverage lights the glass with room light so the fringes carry across black, as they do on a real filmed screen. The physics is the same as before: a flat sensor, turned by Angle and bent by the lens (Rings), beats against the grid on the curved glass, so the fringes warp with both.
+- **The picture stays sharp at every Moiré Scale.** The sensor photographs only the fine structure (the grid and the raster lines), and that photo multiplies the picture. The grid's cells are also drawn sharp at full resolution, since a sensor at two photosites per triad records the fringes but not the cells themselves.
+- **Phone-camera sensor.** Photosites gather light from 40% of their width, with no anti-aliasing filter, so detail finer than the sensor aliases into strong fringes instead of averaging away. Raster lines beat against the sensor rows too, adding horizontal streaks when Scanlines is on.
+- **Moiré Density** reaches much tighter fringes, from broad bands to streaks a few cells apart. Moiré Angle defaults to 0.
+- Phone Off Screen, Rainbow Grille and Filmed Off TV photograph the Screen's own mask again (Moiré Grid: Same as Screen), as in v2.0.0-beta, and their dark areas now show moiré too.
 
 ## v2.0.0-beta
 

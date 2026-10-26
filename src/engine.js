@@ -33,6 +33,8 @@
         lincopy: this._program(S.VERT, S.LINCOPY),
         blur: this._program(S.VERT, S.BLUR),
         screen: this._program(S.VERT, S.SCREEN),
+        sensor: this._program(S.VERT, S.SENSOR),
+        demosaic: this._program(S.VERT, S.DEMOSAIC),
         pregrade: this._program(S.VERT, S.PREGRADE),
       };
       this.srcTex = this._texture(true);
@@ -297,7 +299,42 @@
         uSig: picture, uBlurA: this.A[0].tex, uBlurB: this.B[0].tex, uBlurC: this.C[0].tex, uBlurD: this.D[0].tex, uSrc: this.srcTex,
       };
 
-      this._pass(this.progs.screen, null, U, tube);
+      // a camera filming the tube, only while moiré is on. It always shoots at export resolution,
+      // so the fitted preview shows the same photo as the export, scaled down through its mipmaps.
+      U.uSensorRes = [1, 1]; U.uPitchS = 1; U.uExpRes = [this.expW, this.expH]; U.uCamAngle = 0; U.uCamStripe = 1;
+      let cameraTex = this.srcTex; // bound but unread when the camera is off
+      if (Math.max(params.moire || 0, params.rainbow || 0) > 0.001) {
+        // the grid the camera sees, sub-stripe width in export pixels: its own (Moiré Scale, from
+        // single-pixel cells up) or, with Moiré Grid on Same as Screen, the tube's mask (maskPitch())
+        const type = Math.round(params.maskType), ms = params.maskScale;
+        const stripe = Math.round(params.moireGrid) === 4
+          ? (type === 3 ? 0.67 + 0.93 * ms : 1 + 11 * ms * ms)
+          : 0.5 + 7.5 * params.moireScale * params.moireScale;
+        // two photosites per colour triad, so the Bayer filter's red and blue sites (every other
+        // photosite) sit one triad apart; Density pulls the pitch off that, and the further off it is
+        // the tighter the fringes: from broad bands (0) to streaks a few cells apart (1)
+        const detune = 0.002 + 0.4 * params.moirePitch ** 3;
+        const pitch = Math.max(1, 1.5 * stripe * (1 + detune));
+        // Drift: the camera breathes, a slight zoom and turn that sets the fringes crawling
+        const drift = params.moireDrift || 0;
+        const breathe = 1 + 0.004 * drift * Math.sin(time * 0.53);
+        // enough photosites to cover the frame at any camera angle, with room for the lens bend and drift
+        const a = Math.abs(params.moireAngle * Math.PI / 180) + 0.01, c = Math.cos(a), s = Math.sin(a);
+        const w = Math.ceil((this.expW * c + this.expH * s) * 1.15 / pitch) + 4;
+        const h = Math.ceil((this.expW * s + this.expH * c) * 1.15 / pitch) + 4;
+        if (!this.sensor || this.sensor.w !== w || this.sensor.h !== h) {
+          this._free(this.sensor); this._free(this.camera);
+          this.sensor = this._target(w, h, false);   // raw photosites
+          this.camera = this._target(w, h, true);    // the developed photo, mipmapped
+        }
+        U.uSensorRes = [w, h]; U.uPitchS = pitch * breathe; U.uCamStripe = stripe;
+        U.uCamAngle = params.moireAngle + 0.5 * drift * Math.sin(time * 0.37);
+        this._pass(this.progs.sensor, this.sensor, U, tube);
+        this._pass(this.progs.demosaic, this.camera, U, { ...tube, uSensor: this.sensor.tex });
+        this._mips(this.camera);
+        cameraTex = this.camera.tex;
+      }
+      this._pass(this.progs.screen, null, U, { ...tube, uSensor: cameraTex, uCamera: cameraTex });
       this.ping = 1 - this.ping;
       return true;
     }

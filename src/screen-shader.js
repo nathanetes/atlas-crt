@@ -1,6 +1,7 @@
 // Atlas CRT shader sources, part 2: the screen pass. It draws the tube at output
-// resolution (geometry, beams, phosphor mask, glow, the camera filming it and its moiré),
-// then the post grade and the film stock on top.
+// resolution (geometry, beams, phosphor mask, glow, the camera filming it), then the
+// post grade and the film stock on top. The camera's sensor and develop passes (SENSOR,
+// DEMOSAIC) share it.
 (function () {
   const S = window.AtlasShaders;
 
@@ -12,7 +13,7 @@ uniform float u_mix, u_bright, u_contrast, u_postGlow, u_halation;
 uniform float u_maskType, u_maskScale, u_phosphor, u_scanlines, u_refresh, u_persistence;
 uniform float u_sync, u_ripple, u_flicker, u_softness, u_pbloom, u_overscan;
 uniform float u_capture, u_shutter, u_pulseContrast, u_bandAngle, u_readout;
-uniform float u_moire, u_rainbow, u_moireCover, u_moirePitch, u_moireAngle, u_moireRings, u_moireDrift;
+uniform float u_moire, u_rainbow, u_moireScale, u_moireGrid, u_moireCells, u_moireColor, u_moireCover, u_moirePitch, u_moireAngle, u_moireRings, u_moireDrift;
 uniform float u_conv, u_convAngle, u_pconv;
 uniform float u_glow, u_spectral, u_curve, u_stretch, u_fisheye, u_outside, u_extend, u_vignette, u_tint, u_gamut;
 
@@ -51,6 +52,21 @@ vec3 beam(vec2 uv) {
   vec3 sc = beamW(sigLine(l0 - 1.0, uv.x), f + 1.0) + beamW(c0, f) + beamW(c1, 1.0 - f) + beamW(sigLine(l0 + 2.0, uv.x), 2.0 - f);
   return mix(lin, sc, amt);
 }
+// the beams' light with the raster lines smoothed away
+vec3 beamFlat(vec2 uv) {
+  float yl = uv.y * uSigRes.y - 0.5;
+  float l0 = floor(yl);
+  return mix(sigLine(l0, uv.x), sigLine(l0 + 1.0, uv.x), yl - l0);
+}
+// the raster lines alone: a mid-grey beam's profile across the lines at uv, averaging 1
+float lineProfile(vec2 uv, float outH) {
+  float amt = u_scanlines * smoothstep(2.0, 3.5, outH / uSigRes.y);
+  if (amt < 0.001) return 1.0;
+  float f = fract(uv.y * uSigRes.y - 0.5);
+  float s = 0.26 * (1.0 + u_softness), w = 0.0;
+  for (int k = -1; k <= 2; k++) { float d = f - float(k); w += exp(-d * d / (2.0 * s * s)); }
+  return mix(1.0, w / (s * 2.5066), amt);
+}
 
 // sub-stripe width in canvas pixels, up to 12px at full Mask Scale; uScale shrinks it for the fitted preview
 float maskPitch(int type) {
@@ -74,10 +90,8 @@ vec3 deltaDot(vec2 fc, float u) {
   vec3 m = vec3(float(ch < 0.5), float(ch > 0.5 && ch < 1.5), float(ch > 1.5));
   return m * (1.0 - smoothstep(0.32, 0.5, d)) * 4.8;
 }
-// the mask's light at a point, averaged over a square footprint fp canvas pixels wide
-vec3 maskAt(vec2 fc, float fp) {
-  int type = int(u_maskType + 0.5);
-  float u = maskPitch(type);
+// a mask's light at a point, for a sub-stripe width u, averaged over a square footprint fp (same units)
+vec3 maskAtU(vec2 fc, float fp, int type, float u) {
   vec3 tri = triadAvg(fc.x / (3.0 * u), fp / (3.0 * u));
   if (type == 1) return tri * 2.4;                                  // aperture grille
   if (type == 0 || type == 3) {                                     // slot mask / fine slot
@@ -98,6 +112,14 @@ vec3 maskAt(vec2 fc, float fp) {
   rowLit = mix(rowLit, 0.85, smoothstep(0.3, 1.0, fp / (3.0 * u)));  // 0.85: the rows' average
   return tri * rowLit * 3.0;
 }
+// the tube's own mask, in canvas pixels
+vec3 maskAt(vec2 fc, float fp) {
+  int type = int(u_maskType + 0.5);
+  return maskAtU(fc, fp, type, maskPitch(type));
+}
+// each mask averages to 1 in linear light once divided by its mean
+// (measured means: slot 0.832, grille 0.9, delta 0.743, fine slot 0.832, grid 0.956)
+float maskMean(int type) { return type == 1 ? 0.9 : type == 2 ? 0.743 : type == 4 ? 0.956 : 0.832; }
 
 float bayer4(vec2 p) {
   ivec2 q = ivec2(mod(p, 4.0));
@@ -139,18 +161,15 @@ Face faceAt(vec2 uv) {
   return Face(p, suv, r2, inside);
 }
 
-// the beams' light at a face point, with convergence error (before the phosphor mask)
-vec3 beamLight(Face F) {
+// the beams' light at a face point, with convergence error (before the phosphor mask);
+// noLines leaves out the raster lines
+vec3 beamAt(vec2 uv, bool noLines) { return noLines ? beamFlat(uv) : beam(uv); }
+vec3 beamLight(Face F, bool noLines) {
   vec2 p = F.p, suv = F.suv;
-  vec3 col;
-  if (u_conv > 0.001) {
-    float a = radians(u_convAngle);
-    vec2 coff = (p * 0.006 + vec2(cos(a), sin(a)) * 0.004) * u_conv;
-    col = vec3(beam(suv + coff).r, beam(suv).g, beam(suv - coff).b);
-  } else {
-    col = beam(suv);
-  }
-  return col;
+  if (u_conv < 0.001) return beamAt(suv, noLines);
+  float a = radians(u_convAngle);
+  vec2 coff = (p * 0.006 + vec2(cos(a), sin(a)) * 0.004) * u_conv;
+  return vec3(beamAt(suv + coff, noLines).r, beamAt(suv, noLines).g, beamAt(suv - coff, noLines).b);
 }
 
 // the phosphor mask, drawn on the glass so it follows the curve, averaged over a footprint fp
@@ -166,16 +185,10 @@ vec3 phosphorMask(Face F, vec3 col, float fp) {
   } else {
     m = maskAt(mfc, fp);
   }
-  // each mask averages to 1 in linear light, so phosphor strength changes texture, not brightness
-  // (measured means: slot 0.832, grille 0.9, delta 0.743, fine slot 0.832, grid 0.956)
-  m /= mtype == 1 ? 0.9 : mtype == 2 ? 0.743 : mtype == 4 ? 0.956 : 0.832;
+  // averaging to 1, phosphor strength changes texture, not brightness
+  m /= maskMean(mtype);
   m = mix(m, vec3(1.0), clamp((lum(toGam(col)) - 0.55) * 1.5, 0.0, 1.0) * u_pbloom);
   return max(mix(vec3(1.0), m, u_phosphor), 0.0);
-}
-
-vec3 tubeLight(Face F) {
-  vec3 col = beamLight(F);
-  return col * phosphorMask(F, col, 1.0);
 }
 
 // light spread in the signal path and the glass at a face point
@@ -210,50 +223,130 @@ vec3 gamutOf(vec3 col) {
   return col;
 }
 
-// ---------------------------------------------------------------- moiré
-// A camera filming a tube sees its flat sensor grid beat against the curved phosphor grid, and the
-// beat shows as broad bands that cycle through the spectrum. They're drawn as an overlay on the whole
-// tube face, whatever the mask is set to: Density sets how many bands, Angle turns them, Rings bends
-// them into the lens's circles, and Drift lets them crawl the way they do when the camera breathes.
-float moirePhase(Face F) {
-  vec2 flatP = (vUv * 2.0 - 1.0) * vec2(uAspect, 1.0);  // the camera's flat frame
-  vec2 faceP = F.p * vec2(uAspect, 1.0);                // the curved tube face
-  float n = mix(1.5, 28.0, u_moirePitch * u_moirePitch); // bands per picture height
-  float a = radians(2.0 * u_moireAngle + 6.0 * u_moireDrift * sin(uTime * 0.37));
-  vec2 dir = vec2(sin(a), cos(a));                      // angle 0: horizontal bands
-  float ph = 0.5 * n * dot(dir, faceP);
-  ph += 3.0 * n * dot(dir, faceP - flatP);              // the glass bends them near the edges
-  ph += u_moireRings * 1.5 * n * dot(flatP, flatP) / (uAspect * uAspect + 1.0); // the lens bends them into rings (corners at 1)
-  return ph + u_moireDrift * (0.12 * uTime + 0.25 * sin(uTime * 0.71));
+// ---------------------------------------------------------------- the camera
+// Moiré is what a camera records when it photographs a tube: two grids beating against each other.
+// One is the phosphor grid, drawn on the curved glass; the other is the camera's sensor, a flat grid
+// of photosites turned by Angle and bent by the lens (Rings). Each photosite averages the light over
+// its area, so wherever the two grids nearly line up, that average swings slowly from one triad to the
+// next: fringes that bend with the glass and the lens. Behind the Bayer colour filter each photosite
+// sees only red, green or blue, so the red and blue sites form grids one triad apart and the fringes
+// cycle through the spectrum; without the filter (Moiré Bands only) they're mostly in brightness.
+// Moiré Scale sets the grid the camera photographs, from single-pixel cells (fine pixel moiré) to
+// chunky stripes, independent of the Screen mask; Moiré Grid picks its pattern. Density detunes the
+// sensor against it, which sets how wide the fringes are, and Drift lets the camera breathe so they
+// crawl. Room light on the faceplate (Coverage) lights the grid where the picture is dark, which is why
+// a real filmed screen shows moiré across black too.
+// The sensor photographs the fine structure only (the grid and the raster lines, lit evenly), and that
+// photo multiplies the picture with its lines smoothed away. The picture changes far more slowly than
+// the grid, so this is what the camera would record, and the image stays sharp at any Moiré Scale.
+// At two photosites per triad the sensor records the fringes but not the grid's cells, so the cells
+// are also drawn sharp at this resolution (Pixel Visibility): small Moiré Scales read as pixels.
+// The camera always shoots at export resolution, so the fitted preview shows the same photo, scaled
+// down, instead of a different moiré from a coarser sensor.
+uniform sampler2D uSensor, uCamera;
+uniform vec2 uSensorRes;    // photosites across and down, centred on the picture
+uniform vec2 uExpRes;       // export size in pixels: the camera's frame of reference
+uniform float uPitchS;      // photosite pitch in export pixels
+uniform float uCamAngle;    // sensor rotation in degrees: Angle plus Drift's wobble
+uniform float uCamStripe;   // sub-stripe width of the grid the camera sees, in export pixels
+vec2 sensorToExp(vec2 s) {
+  vec2 q = rot(-radians(uCamAngle)) * s * uPitchS;
+  vec2 n = q / uExpRes.y;
+  return uExpRes * 0.5 + q * (1.0 + u_moireRings * 0.25 * dot(n, n));
 }
-// On lit parts of the picture the bands tint it, as a camera would see. Coverage also adds them as
-// light, so they carry into the dark parts where a real camera would record nothing.
-vec3 moireOverlay(vec3 col, Face F) {
-  float ph = moirePhase(F);
-  vec3 rb = 0.5 + 0.5 * cos(6.2831853 * (ph - vec3(0.0, 0.33333, 0.66667))); // each channel averages 0.5
-  float lb = 0.5 + 0.5 * cos(12.566371 * ph);
-  col *= mix(vec3(1.0), 2.0 * rb, u_rainbow * 0.55);
-  col *= mix(1.0, 0.4 + 1.2 * lb, u_moire * 0.6);
-  vec3 light = (rb * u_rainbow + vec3(lb) * u_moire * 0.5) * u_moireCover * 0.35 * F.inside;
-  return 1.0 - (1.0 - col) * (1.0 - min(light, 1.0));
+vec2 expToSensor(vec2 e) {
+  vec2 q = e - uExpRes * 0.5;
+  vec2 n = q / uExpRes.y;
+  q /= 1.0 + u_moireRings * 0.25 * dot(n, n);   // inverse of the lens, close enough for small bends
+  return rot(radians(uCamAngle)) * q / uPitchS;
+}
+vec3 site(ivec2 i) { return texelFetch(uSensor, clamp(i, ivec2(0), ivec2(uSensorRes) - 1), 0).rgb; }
+// bilinear interpolation over one colour's sites in the Bayer mosaic (every other photosite, offset o)
+float bayerPlane(vec2 x, vec2 o, int ch) {
+  vec2 g = (x - o) * 0.5, b = floor(g), f = g - b;
+  ivec2 s = ivec2(b * 2.0 + o);
+  return mix(mix(site(s)[ch], site(s + ivec2(2, 0))[ch], f.x), mix(site(s + ivec2(0, 2))[ch], site(s + ivec2(2, 2))[ch], f.x), f.y);
+}
+// the developed photo at an output pixel, sampled with mipmaps so smaller views stay smooth
+vec3 cameraView(vec2 fc) {
+  vec2 s = expToSensor(fc * uExpRes / uOut);
+  return texture(uCamera, (s + uSensorRes * 0.5) / uSensorRes).rgb;
+}
+// the grid the camera photographs at a face point, averaged over a footprint fp export pixels wide;
+// Moiré Grid: Pixel Grid, Aperture Grille, Slot Mask, Delta Dot, or the Screen's own mask
+int cameraGridType() {
+  int g = int(u_moireGrid + 0.5);
+  return g == 0 ? 4 : g == 1 ? 1 : g == 2 ? 0 : g == 3 ? 2 : int(u_maskType + 0.5);
+}
+vec3 cameraGrid(Face F, float fp) {
+  int type = cameraGridType();
+  return maskAtU(F.suv * uExpRes, fp, type, uCamStripe) / maskMean(type);
+}
+// the same grid's cells at this canvas's resolution, anti-aliased over one pixel
+vec3 cameraCells(Face F) {
+  int type = cameraGridType();
+  return maskAtU(F.suv * uOut, 1.0, type, uCamStripe * uScale) / maskMean(type);
 }
 
+#ifdef DEMOSAIC
+// develop the raw sensor: rebuild colour from the Bayer mosaic (R on even/even sites, B on odd/odd,
+// G on the rest), blended with an unfiltered sensor by how much of the camera is Rainbow. Like a
+// phone's processing, Moiré Color then boosts the false colour the mosaic leaves in the fringes.
+void main() {
+  vec2 x = floor(gl_FragCoord.xy);
+  vec3 mosaic = vec3(bayerPlane(x, vec2(0.0), 0),
+                     0.5 * (bayerPlane(x, vec2(1.0, 0.0), 1) + bayerPlane(x, vec2(0.0, 1.0), 1)),
+                     bayerPlane(x, vec2(1.0), 2));
+  float cam = max(u_moire, u_rainbow);
+  vec3 c = mix(site(ivec2(x)), mosaic, clamp(u_rainbow / max(cam, 1e-4), 0.0, 1.0));
+  float y = lum(c);
+  o = vec4(max(y + (c - y) * (1.0 + 4.0 * u_moireColor), 0.0), 1.0);
+}
+#elif defined(SENSOR)
+// the sensor pass: each photosite records the grid averaged exactly over its light-gathering area,
+// and the raster lines averaged over three points down it (a slightly off pitch beats them into
+// horizontal fringes). Like a phone camera, there's no anti-aliasing filter, and each site gathers
+// light from about 40% of its width (SITE_APERTURE), so detail finer than the sensor aliases into
+// strong fringes instead of averaging away.
+void main() {
+  vec2 s = floor(gl_FragCoord.xy) + 0.5 - uSensorRes * 0.5;
+  Face C = faceAt(clamp(sensorToExp(s) / uExpRes, 0.0, 1.0));
+  float lines = 0.0;
+  for (int j = 0; j < 3; j++) {
+    vec2 uv = clamp(sensorToExp(s + vec2(0.0, (float(j) + 0.5) / 3.0 - 0.5)) / uExpRes, 0.0, 1.0);
+    lines += lineProfile(faceAt(uv).suv, uExpRes.y);
+  }
+  const float SITE_APERTURE = 0.4;
+  o = vec4(cameraGrid(C, uPitchS * SITE_APERTURE) * lines / 3.0, 1.0);
+}
+#else
 void main() {
   vec2 uv = vUv;
   float t = uTime;
   Face F = faceAt(uv);
   vec2 p = F.p, suv = F.suv;
   float r2 = F.r2, inside = F.inside;
-  vec3 col = gamutOf(tubeLight(F) + glowLight(F));
+  vec3 beamL = beamLight(F, false), glowL = glowLight(F);
+  vec3 col = gamutOf(beamL * phosphorMask(F, beamL, 1.0) + glowL);
+
+  // seen through the camera: the picture without its fine structure, plus room light on the glass,
+  // times the grid and raster lines as the sensor photographed them. Moiré and Rainbow set how much
+  // (the developed photo already holds the Bayer mix).
+  // ROOM_LIGHT: room light on the faceplate at full Coverage, in linear light (about 20% grey on screen)
+  const float ROOM_LIGHT = 0.025;
+  float cam = max(u_moire, u_rainbow);
+  if (cam > 0.001) {
+    vec3 fringes = cameraView(gl_FragCoord.xy);
+    vec3 cells = mix(vec3(1.0), cameraCells(F), u_moireCells) * lineProfile(suv, uOut.y);
+    vec3 seen = (beamLight(F, true) + vec3(ROOM_LIGHT * u_moireCover)) * fringes * cells * inside + glowL;
+    col = mix(col, gamutOf(seen), cam);
+  }
 
   // back to display values: the camera, lens and grade below are tuned on these.
   // TUBE_DRIVE is the set's contrast drive: 1.0 shows the signal's true level, 1.3 keeps
   // the brightness the factory looks were tuned at before the tube moved to linear light.
   const float TUBE_DRIVE = 1.3;
   col = toGam(col * TUBE_DRIVE);
-
-  // the camera's moiré, laid over the whole tube face
-  if (u_rainbow + u_moire > 0.001) col = moireOverlay(col, F);
 
   // camera filming the tube: scan pulse against the shutter
   if (u_capture > 0.001) {
@@ -359,5 +452,10 @@ void main() {
   vec2 dq = gl_FragCoord.xy + fract(uFrame * 0.618) * 113.0;
   col += (hash12(dq) + hash12(dq + 57.3) - 1.0) / 255.0;
   o = vec4(max(col, 0.0) * a, a);
-}`;
+}
+#endif`;
+
+  // the camera's sensor and develop passes are the same source with their own main()
+  S.SENSOR = S.SCREEN.replace('#version 300 es\n', '#version 300 es\n#define SENSOR\n');
+  S.DEMOSAIC = S.SCREEN.replace('#version 300 es\n', '#version 300 es\n#define DEMOSAIC\n');
 })();
