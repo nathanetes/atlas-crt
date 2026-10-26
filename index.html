@@ -287,13 +287,16 @@ html.no-intro #intro { display: none; }
 </script>
 </head>
 <body>
-<div id="intro" aria-hidden="true"><video src="media/intro.mp4" muted playsinline preload="auto"></video></div>
+<div id="intro" aria-hidden="true"><video muted playsinline preload="auto"></video></div>
 <script>
   // play the intro and fade into the app as it finishes; a click or key skips it, and a video
-  // that fails, is blocked or stalls ends it at once so the app is never held behind it
+  // that fails, is blocked or stalls ends it at once so the app is never held behind it.
+  // Screens taller than wide (phones held upright) get the 1080x1920 version; if it's missing
+  // or won't play, they fall back to the landscape one.
   (function () {
     var el = document.getElementById('intro');
     if (document.documentElement.classList.contains('no-intro')) { el.remove(); return; }
+    var LANDSCAPE = 'media/intro.mp4', PORTRAIT = 'media/intro-portrait.mp4';
     var v = el.querySelector('video'), done = false;
     var FADE = 0.45; // seconds, matches the opacity transition
     function end() {
@@ -302,13 +305,20 @@ html.no-intro #intro { display: none; }
       el.classList.add('out');
       setTimeout(function () { el.remove(); }, FADE * 1000 + 50);
     }
+    function play(src) {
+      v.src = src;
+      var started = v.play();
+      // a blocked autoplay ends the intro; a missing or broken file is handled by the error event
+      if (started && started.catch) started.catch(function (e) { if (e && e.name === 'NotAllowedError') end(); });
+    }
     v.addEventListener('timeupdate', function () { if (v.duration && v.currentTime >= v.duration - FADE) end(); });
     v.addEventListener('ended', end);
-    v.addEventListener('error', end);
+    v.addEventListener('error', function () {
+      if (v.src.indexOf(PORTRAIT) > -1) play(LANDSCAPE); else end();
+    });
     el.addEventListener('click', end);
     addEventListener('keydown', end, { once: true });
-    var started = v.play();
-    if (started && started.catch) started.catch(end);
+    play(window.matchMedia && matchMedia('(orientation: portrait)').matches ? PORTRAIT : LANDSCAPE);
     setTimeout(end, 8000);
   })();
 </script>
