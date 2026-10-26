@@ -318,7 +318,7 @@
     state.auto = saved.auto || {};
     state.look = saved.look || null;
   } else {
-    applyLook(PRESETS.find((p) => p.name === 'Terminal Glow') || { name: null, p: {} });
+    applyLook(PRESETS.find((p) => p.name === 'Init') || { name: null, p: {} });
   }
   // open the looks tab on the active look's category
   const cur = PRESETS.find((p) => p.name === state.look);
