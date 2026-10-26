@@ -1,11 +1,11 @@
 // Atlas CRT shader sources, part 2: the screen pass. It draws the tube at output
 // resolution (geometry, beams, phosphor mask, glow, the camera filming it), then the
-// creative grade and the film stock on top.
+// creative grade and the film stock on top. The camera sensor pass (SENSOR) shares it.
 (function () {
   const S = window.AtlasShaders;
 
   S.SCREEN = S.COMMON + `
-uniform sampler2D uSig, uBlurA, uBlurB, uSrc;
+uniform sampler2D uSig, uBlurA, uBlurB, uBlurC, uBlurD, uSrc;
 uniform vec2 uOut, uSigRes;
 uniform float uTime, uFrame, uAspect, uSplit, uScale;
 uniform float u_mix, u_bright, u_contrast, u_postGlow, u_halation;
@@ -14,14 +14,27 @@ uniform float u_sync, u_ripple, u_flicker, u_softness, u_pbloom, u_overscan;
 uniform float u_capture, u_shutter, u_pulseContrast, u_bandAngle, u_readout;
 uniform float u_moire, u_rainbow, u_moirePitch, u_moireAngle, u_moireRings;
 uniform float u_conv, u_convAngle, u_pconv;
-uniform float u_glow, u_spectral, u_curve, u_stretch, u_fisheye, u_outside, u_extend, u_vignette, u_tint;
+uniform float u_glow, u_spectral, u_curve, u_stretch, u_fisheye, u_outside, u_extend, u_vignette, u_tint, u_gamut;
+
+// Tube phosphors to the viewer's sRGB display, in linear light, with no adaptation to the white point.
+// SMPTE-C primaries (the P22 set used in NTSC studio monitors): R 0.630,0.340  G 0.310,0.595  B 0.155,0.070.
+// D65 white 0.3127,0.3290; D93 is the CIE daylight locus at 9300 K, 0.2833,0.2973, scaled so its bluish white fits the display.
+const mat3 P22_D65 = mat3(0.9395, 0.0178, -0.0016, 0.0502, 0.9658, -0.0044, 0.0103, 0.0164, 1.0060);
+const mat3 P22_D93 = mat3(0.5845, 0.0111, -0.0010, 0.0378, 0.7270, -0.0033, 0.0103, 0.0164, 1.0043);
 uniform float u_hue, u_sat, u_temp, u_tintGM, u_shHue, u_shAmt, u_hiHue, u_hiAmt, u_lift, u_gamma;
 uniform float u_poster, u_solar, u_gmap, u_cross, u_invert, u_chanSwap, u_grunge, u_crush;
 uniform float u_film, u_filmSize, u_filmColor, u_filmResp, u_filmVar, u_dust, u_weave;
 
+// one scanline of the signal, decoded to the light the beam puts out. Interlaced, the field just
+// scanned glows brighter than the one fading from the frame before (gains average to 1), so detail
+// one line tall flickers at half the field rate: line twitter.
+uniform float uField;
+const float FIELD_NOW = 1.33, FIELD_OLD = 0.67;
 vec3 sigLine(float l, float x) {
   l = clamp(l, 0.0, uSigRes.y - 1.0);
-  return textureLod(uSig, vec2(x, (l + 0.5) / uSigRes.y), 0.0).rgb;
+  vec3 c = toLin(textureLod(uSig, vec2(x, (l + 0.5) / uSigRes.y), 0.0).rgb);
+  if (uField >= 0.0) c *= mod(l, 2.0) == uField ? FIELD_NOW : FIELD_OLD;
+  return c;
 }
 // one scanline's beam: brighter lines draw wider, normalised so average light holds
 vec3 beamW(vec3 c, float d) {
@@ -43,29 +56,48 @@ vec3 beam(vec2 uv) {
 float maskPitch(int type) {
   return (type == 3 ? mix(0.67, 1.6, u_maskScale) : 1.0 + 11.0 * u_maskScale * u_maskScale) * uScale;
 }
-vec3 maskAt(vec2 fc) {
+// The stripes' colour triad, averaged over a footprint w triad-periods wide. triad() is
+// 0.375 + 0.5 cos + 0.125 cos(2x), and a box average scales each cosine by its sinc, so this is exact:
+// the screen uses a one-pixel footprint (fine masks fade to their average instead of aliasing), and
+// the camera a photosite-wide one (the beat it leaves behind is the moiré).
+float sincN(float x) { return abs(x) < 1e-4 ? 1.0 : sin(x) / x; }
+vec3 triadAvg(float x, float w) {
+  vec3 th = 6.2831853 * (x - vec3(0.0, 0.33333, 0.66667));
+  return 0.375 + 0.5 * sincN(3.14159265 * w) * cos(th) + 0.125 * sincN(6.2831853 * w) * cos(2.0 * th);
+}
+vec3 deltaDot(vec2 fc, float u) {
+  vec2 g = fc / (u * 2.0);
+  float row = floor(g.y);
+  g.x += mod(row, 2.0) * 0.5;
+  vec2 id = floor(g);
+  float d = length((fract(g) - 0.5) * vec2(1.0, 1.15));
+  float ch = mod(id.x + 2.0 * row, 3.0);
+  vec3 m = vec3(float(ch < 0.5), float(ch > 0.5 && ch < 1.5), float(ch > 1.5));
+  return m * (1.0 - smoothstep(0.32, 0.5, d)) * 4.8;
+}
+// the mask's light at a point, averaged over a square footprint fp canvas pixels wide
+vec3 maskAt(vec2 fc, float fp) {
   int type = int(u_maskType + 0.5);
   float u = maskPitch(type);
-  if (type == 1) return triad(fc.x / (3.0 * u)) * 2.4;            // aperture grille
+  vec3 tri = triadAvg(fc.x / (3.0 * u), fp / (3.0 * u));
+  if (type == 1) return tri * 2.4;                                  // aperture grille
   if (type == 0 || type == 3) {                                     // slot mask / fine slot
     float col = floor(fc.x / (3.0 * u));
     float y = fract(fc.y / (3.45 * u) + mod(col, 2.0) * 0.5);
     float gap = smoothstep(0.7, 0.8, y) * (1.0 - smoothstep(0.92, 1.0, y));
-    return triad(fc.x / (3.0 * u)) * (1.0 - 0.85 * gap) * 2.7;
+    gap = mix(gap, 0.21, smoothstep(0.3, 1.0, fp / (3.45 * u)));   // 0.21: the slot gaps' average
+    return tri * (1.0 - 0.85 * gap) * 2.7;
   }
-  if (type == 2) {                                                  // delta dot shadow mask
-    vec2 g = fc / (u * 2.0);
-    float row = floor(g.y);
-    g.x += mod(row, 2.0) * 0.5;
-    vec2 id = floor(g);
-    float d = length((fract(g) - 0.5) * vec2(1.0, 1.15));
-    float ch = mod(id.x + 2.0 * row, 3.0);
-    vec3 m = vec3(float(ch < 0.5), float(ch > 0.5 && ch < 1.5), float(ch > 1.5));
-    return m * (1.0 - smoothstep(0.32, 0.5, d)) * 4.8;
+  if (type == 2) {                                                  // delta dot shadow mask: 2D, so supersampled
+    if (fp < 0.5 * u) return deltaDot(fc, u);
+    vec3 acc = vec3(0.0);
+    for (int j = 0; j < 4; j++) for (int i = 0; i < 4; i++) acc += deltaDot(fc + (vec2(i, j) - 1.5) * fp / 4.0, u);
+    return acc / 16.0;
   }
   vec2 f = fract(fc / (3.0 * u));                                    // square grid
   float rowLit = smoothstep(0.0, 0.15, f.y) * (1.0 - smoothstep(0.85, 1.0, f.y));
-  return triad(fc.x / (3.0 * u)) * rowLit * 3.0;
+  rowLit = mix(rowLit, 0.85, smoothstep(0.3, 1.0, fp / (3.0 * u)));  // 0.85: the rows' average
+  return tri * rowLit * 3.0;
 }
 
 float bayer4(vec2 p) {
@@ -75,8 +107,12 @@ float bayer4(vec2 p) {
 }
 float grainN(vec2 p) { return (vnoise(p) + 0.5 * vnoise(p * 2.13 + 7.1) - 0.75) * 1.6; }
 
-void main() {
-  vec2 uv = vUv;
+// ---------------------------------------------------------------- the tube
+// Shared by the screen pass and the camera sensor pass, so the camera films exactly this tube.
+
+// where a point of the picture lands on the tube face, after deflection and the glass
+struct Face { vec2 p, suv; float r2, inside; };
+Face faceAt(vec2 uv) {
   float t = uTime;
   vec2 p = uv * 2.0 - 1.0;
 
@@ -102,8 +138,12 @@ void main() {
     float px = 2.0 / uOut.y;
     inside = 1.0 - smoothstep(-px, px, sdf);
   }
+  return Face(p, suv, r2, inside);
+}
 
-  // beams with convergence error
+// the beams' light at a face point, with convergence error (before the phosphor mask)
+vec3 beamLight(Face F) {
+  vec2 p = F.p, suv = F.suv;
   vec3 col;
   if (u_conv > 0.001) {
     float a = radians(u_convAngle);
@@ -112,35 +152,143 @@ void main() {
   } else {
     col = beam(suv);
   }
+  return col;
+}
 
-  // phosphor mask, drawn on the glass so it follows the curve; above 1 the gaps go black
+// the phosphor mask, drawn on the glass so it follows the curve, averaged over a footprint fp
+// canvas pixels wide (one pixel for the screen, one photosite for the camera); above 1 the gaps go black
+vec3 phosphorMask(Face F, vec3 col, float fp) {
   int mtype = int(u_maskType + 0.5);
-  if (u_phosphor > 0.001) {
-    vec2 mfc = suv * uOut;
-    vec3 m;
-    if (u_pconv > 0.001) {
-      float sh = u_pconv * 1.5 * maskPitch(mtype);
-      m = vec3(maskAt(mfc + vec2(sh, 0.0)).r, maskAt(mfc).g, maskAt(mfc - vec2(sh, 0.0)).b);
-    } else {
-      m = maskAt(mfc);
-    }
-    // a mask finer than the canvas can show is drawn as its average instead of aliasing
-    m = mix(vec3(0.92), m, smoothstep(0.55, 1.2, maskPitch(mtype)));
-    m = mix(m, vec3(1.0), clamp((lum(col) - 0.55) * 1.5, 0.0, 1.0) * u_pbloom);
-    col *= max(mix(vec3(1.0), m, u_phosphor), 0.0);
+  if (u_phosphor < 0.001) return vec3(1.0);
+  vec2 mfc = F.suv * uOut;
+  vec3 m;
+  if (u_pconv > 0.001) {
+    float sh = u_pconv * 1.5 * maskPitch(mtype);
+    m = vec3(maskAt(mfc + vec2(sh, 0.0), fp).r, maskAt(mfc, fp).g, maskAt(mfc - vec2(sh, 0.0), fp).b);
+  } else {
+    m = maskAt(mfc, fp);
   }
+  // each mask averages to 1 in linear light, so phosphor strength changes texture, not brightness
+  // (measured means: slot 0.832, grille 0.9, delta 0.743, fine slot 0.832, grid 0.956)
+  m /= mtype == 1 ? 0.9 : mtype == 2 ? 0.743 : mtype == 4 ? 0.956 : 0.832;
+  m = mix(m, vec3(1.0), clamp((lum(toGam(col)) - 0.55) * 1.5, 0.0, 1.0) * u_pbloom);
+  return max(mix(vec3(1.0), m, u_phosphor), 0.0);
+}
 
-  // light spreading in the signal path and the glass; bloom from highlights plus a faint veil
+vec3 tubeLight(Face F) {
+  vec3 col = beamLight(F);
+  return col * phosphorMask(F, col, 1.0);
+}
+
+// light spread in the signal path and the glass at a face point
+vec3 glowLight(Face F) {
+  vec2 p = F.p, suv = F.suv;
+  // light spreading in the signal path and the glass; bloom from highlights plus a faint veil.
+  // The pyramids hold linear light; thresholds are the old signal levels in linear (0.25 -> 0.047, 0.3 -> 0.071).
+  // GLOW_LIN rescales the glow amounts so the factory looks keep the strength they had in signal values.
+  const float GLOW_LIN = 0.3;
   vec3 bA = texture(uBlurA, suv).rgb;
   vec3 bB = texture(uBlurB, suv).rgb;
-  col += (max(bA - 0.25, 0.0) * 1.1 + bA * 0.1) * u_postGlow;
-  col += (max(bB - 0.3, 0.0) * 1.5 + bB * 0.15) * u_glow;
+  vec3 glowL = (max(bA - 0.047, 0.0) * 1.1 + bA * 0.1) * u_postGlow;
+  // glass glow: a bright core from the 1/8 level plus a long, soft tail from the 1/16 and 1/32
+  // levels, the way light scattering in the faceplate falls off slowly rather than stopping
+  const float GLOW_TAIL = 0.35;
+  vec3 tail = 0.6 * texture(uBlurC, suv).rgb + 0.4 * texture(uBlurD, suv).rgb;
+  glowL += (max(bB - 0.071, 0.0) * 1.5 + bB * 0.15 + tail * GLOW_TAIL) * u_glow;
   if (u_spectral > 0.001) {
     vec2 so = p * 0.02 * u_spectral;
     vec3 sb = vec3(texture(uBlurA, suv + so).r, bA.g, texture(uBlurA, suv - so).b);
-    col += max(sb - 0.25, 0.0) * u_spectral * 1.6 * vec3(1.0, 0.9, 1.2);
+    glowL += max(sb - 0.047, 0.0) * u_spectral * 1.6 * vec3(1.0, 0.9, 1.2);
   }
-  if (u_halation > 0.001) col += bB * vec3(1.0, 0.32, 0.14) * smoothstep(0.35, 1.0, lum(bB)) * u_halation * 1.8;
+  if (u_halation > 0.001) glowL += bB * vec3(1.0, 0.32, 0.14) * smoothstep(0.35, 1.0, lum(toGam(bB))) * u_halation * 1.8;
+  return glowL * GLOW_LIN;
+}
+
+// the light leaves the tube in its own phosphor colours
+vec3 gamutOf(vec3 col) {
+  int gamut = int(u_gamut + 0.5);
+  if (gamut == 1) return max(P22_D65 * col, 0.0);
+  if (gamut == 2) return max(P22_D93 * col, 0.0);
+  return col;
+}
+
+// ---------------------------------------------------------------- the camera
+// A camera photographing the tube. Its sensor is a flat grid of photosites, two per phosphor triad
+// (Density nudges it off), turned by Angle and bent by the lens (Rings). Each photosite averages
+// the real light over its area. Behind a Bayer filter each sees only red, green or blue, so the red
+// and blue sites form grids one triad apart: where those nearly line up with the triads they beat
+// into broad rainbow bands that curve with the tube face and the lens. Without the filter (Moiré
+// only) the beat is finer and mostly in brightness.
+uniform sampler2D uSensor;
+uniform vec2 uSensorRes;    // photosites across and down, centred on the picture
+uniform float uPitchS;      // photosite pitch in output pixels
+vec2 sensorToOut(vec2 s) {
+  vec2 q = rot(-radians(u_moireAngle)) * s * uPitchS;
+  vec2 n = q / uOut.y;
+  return uOut * 0.5 + q * (1.0 + u_moireRings * 0.25 * dot(n, n));
+}
+vec2 outToSensor(vec2 fc) {
+  vec2 q = fc - uOut * 0.5;
+  vec2 n = q / uOut.y;
+  q /= 1.0 + u_moireRings * 0.25 * dot(n, n);   // inverse of the lens, close enough for small bends
+  return rot(radians(u_moireAngle)) * q / uPitchS;
+}
+vec3 site(ivec2 i) { return texelFetch(uSensor, clamp(i, ivec2(0), ivec2(uSensorRes) - 1), 0).rgb; }
+// bilinear interpolation over one colour's sites in the Bayer mosaic (every other photosite, offset o)
+float bayerPlane(vec2 x, vec2 o, int ch) {
+  vec2 g = (x - o) * 0.5, b = floor(g), f = g - b;
+  ivec2 s = ivec2(b * 2.0 + o);
+  return mix(mix(site(s)[ch], site(s + ivec2(2, 0))[ch], f.x), mix(site(s + ivec2(0, 2))[ch], site(s + ivec2(2, 2))[ch], f.x), f.y);
+}
+// what the camera recorded at an output pixel: R on even/even sites, B on odd/odd, G on the rest
+vec3 cameraView(vec2 fc, float bayer) {
+  vec2 x = outToSensor(fc) + uSensorRes * 0.5 - 0.5;   // in photosite-centre units
+  vec3 full = texture(uSensor, (x + 0.5) / uSensorRes).rgb;
+  vec3 mosaic = vec3(bayerPlane(x, vec2(0.0), 0),
+                     0.5 * (bayerPlane(x, vec2(1.0, 0.0), 1) + bayerPlane(x, vec2(0.0, 1.0), 1)),
+                     bayerPlane(x, vec2(1.0), 2));
+  return mix(full, mosaic, bayer);
+}
+
+#ifdef SENSOR
+// the sensor pass: each photosite records the tube's light averaged over its area. The mask is
+// averaged exactly (phosphorMask with a photosite-wide footprint); the beams, whose scanlines are
+// coarser, are averaged over three points down the photosite.
+bool inFrame(vec2 uv) { return all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0))); }
+void main() {
+  vec2 s = floor(gl_FragCoord.xy) + 0.5 - uSensorRes * 0.5;
+  vec2 uvc = sensorToOut(s) / uOut;
+  if (!inFrame(uvc)) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  vec3 b = vec3(0.0);
+  for (int j = 0; j < 3; j++) {
+    vec2 uv = sensorToOut(s + vec2(0.0, (float(j) + 0.5) / 3.0 - 0.5)) / uOut;
+    if (!inFrame(uv)) continue;
+    Face F = faceAt(uv);
+    b += beamLight(F) * F.inside;
+  }
+  b /= 3.0;
+  Face C = faceAt(uvc);
+  vec3 light = b * phosphorMask(C, b, uPitchS) + glowLight(C) * C.inside;
+  o = vec4(gamutOf(light), 1.0);
+}
+#else
+void main() {
+  vec2 uv = vUv;
+  float t = uTime;
+  Face F = faceAt(uv);
+  vec2 p = F.p, suv = F.suv;
+  float r2 = F.r2, inside = F.inside;
+  vec3 col = gamutOf(tubeLight(F) + glowLight(F));
+
+  // seen through the camera: Moiré and Rainbow set how much, Rainbow how much of it is the Bayer mosaic
+  float cam = max(u_moire, u_rainbow);
+  if (cam > 0.001) col = mix(col, cameraView(gl_FragCoord.xy, clamp(u_rainbow / cam, 0.0, 1.0)), cam);
+
+  // back to display values: the camera, lens and grade below are tuned on these.
+  // TUBE_DRIVE is the set's contrast drive: 1.0 shows the signal's true level, 1.3 keeps
+  // the brightness the factory looks were tuned at before the tube moved to linear light.
+  const float TUBE_DRIVE = 1.3;
+  col = toGam(col * TUBE_DRIVE);
 
   // camera filming the tube: scan pulse against the shutter
   if (u_capture > 0.001) {
@@ -164,19 +312,6 @@ void main() {
     col *= mix(1.0, pulse, clamp(u_capture * u_pulseContrast * 0.6, 0.0, 1.2));
   }
 
-  // the camera sensor beating against the (curved) grille: colour bands and rings
-  if (u_moire + u_rainbow > 0.001) {
-    float mu = 3.0 * maskPitch(mtype);
-    vec2 fcR = rot(radians(u_moireAngle)) * (gl_FragCoord.xy - uOut * 0.5);
-    float det = mix(0.004, 0.08, u_moirePitch);
-    float beat = (suv.x * uOut.x - uOut.x * 0.5) / mu - fcR.x / (mu * (1.0 + det));
-    float lineP = uOut.y / uSigRes.y;
-    float beatY = (suv.y * uOut.y - uOut.y * 0.5) / lineP - fcR.y / (lineP * (1.0 + det));
-    beat += u_moireRings * 9.0 * r2 + 0.15 * sin(6.2831853 * beatY);
-    col *= mix(vec3(1.0), triad(beat) / 0.375, u_rainbow * 0.55);
-    float lm = 0.5 + 0.25 * cos(6.2831853 * beat) + 0.25 * cos(6.2831853 * beatY);
-    col *= mix(1.0, 0.4 + 1.2 * lm, u_moire * 0.7);
-  }
   col *= 1.0 - u_flicker * (0.1 * hash11(uFrame * 0.61 + 0.3) + 0.05 * sin(t * 47.0));
   col *= 1.0 - u_vignette * 0.55 * smoothstep(0.3, 1.0, r2);
 
@@ -259,6 +394,14 @@ void main() {
   float a = u_outside > 0.5 ? mix(1.0, inside, u_mix) : 1.0;
   col = mix(dry, col * inside, u_mix);
   if (uv.x < uSplit) { col = dry; a = 1.0; }
-  o = vec4(col * a, a);
-}`;
+
+  // triangular dither of about one 8-bit step, so glow falloff and dark gradients don't band
+  vec2 dq = gl_FragCoord.xy + fract(uFrame * 0.618) * 113.0;
+  col += (hash12(dq) + hash12(dq + 57.3) - 1.0) / 255.0;
+  o = vec4(max(col, 0.0) * a, a);
+}
+#endif`;
+
+  // the camera sensor pass is the same source with its own main()
+  S.SENSOR = S.SCREEN.replace('#version 300 es\n', '#version 300 es\n#define SENSOR\n');
 })();

@@ -1,11 +1,15 @@
 // Atlas CRT WebGL2 engine: source upload -> (datamosh) -> signal raster -> glow pyramids -> screen.
+// The signal raster is gamma-encoded; the glow pyramids and the screen's beams, mask and glow work in linear light.
 (function () {
   const RASTER = {
     LO: { lines: 120, wide: 1.5 },
     SD: { lines: 240, wide: 1.5 },
     HI: { lines: 480, wide: 1.25 },
+    '480i': { lines: 480, wide: 1.25, interlaced: true }, // two 240-line fields, one per frame
     FULL: { lines: 0, wide: 1 },
   };
+  // composite video is always 188 subcarrier cycles across the active line, 4 samples per cycle
+  const COMP_W = 752;
 
   class AtlasEngine {
     constructor(canvas) {
@@ -21,9 +25,13 @@
       this.progs = {
         mosh: this._program(S.VERT, S.MOSH),
         signal: this._program(S.VERT, S.SIGNAL),
+        compEnc: this._program(S.VERT, S.COMP_ENC),
+        compDec: this._program(S.VERT, S.COMP_DEC),
         copy: this._program(S.VERT, S.COPY),
+        lincopy: this._program(S.VERT, S.LINCOPY),
         blur: this._program(S.VERT, S.BLUR),
         screen: this._program(S.VERT, S.SCREEN),
+        sensor: this._program(S.VERT, S.SENSOR),
       };
       this.srcTex = this._texture(true);
       this.quality = 'SD';
@@ -155,14 +163,18 @@
       // SD/HI line counts are set on the short side, so portrait clips keep the same pitch
       const lines = r.lines ? Math.round(r.lines / Math.min(1, aspect)) : Math.min(this.srcH, this.expH);
       const width = Math.min(this.maxTex, Math.round(lines * aspect * r.wide));
-      [this.sig, this.low, this.mosh, this.A, this.B].forEach(set => set && set.forEach(t => this._free(t)));
+      [this.sig, this.low, this.mosh, this.A, this.B, this.C, this.D, this.comp].forEach(set => set && set.forEach(t => this._free(t)));
       const pair = () => [this._target(width, lines, true), this._target(width, lines, true)];
       this.sig = pair();
+      this.comp = [this._target(COMP_W, lines, false), this._target(COMP_W, lines, true)]; // encoded wire, decoded picture
       this.low = pair();   // this frame's and last frame's source at raster size, for motion
       this.mosh = pair();  // datamosh feedback
       this.moshFresh = true;
       this.A = [this._target(this.outW / 4, this.outH / 4), this._target(this.outW / 4, this.outH / 4)];
       this.B = [this._target(this.outW / 8, this.outH / 8), this._target(this.outW / 8, this.outH / 8)];
+      // wider levels for the long, soft tail of light scattering in the glass
+      this.C = [this._target(this.outW / 16, this.outH / 16), this._target(this.outW / 16, this.outH / 16)];
+      this.D = [this._target(this.outW / 32, this.outH / 32), this._target(this.outW / 32, this.outH / 32)];
     }
 
     _upload() {
@@ -213,7 +225,8 @@
       if (!this.sig || !this._upload()) return false;
       gl.bindVertexArray(this.vao);
       gl.disable(gl.BLEND);
-      const U = { uTime: time, uFrame: frame % 8192 };
+      // interlaced rasters draw one field per frame: 0 = even rows, 1 = odd rows; -1 = progressive
+      const U = { uTime: time, uFrame: frame % 8192, uField: RASTER[this.quality].interlaced ? frame & 1 : -1 };
       for (const k in params) U['u_' + k] = params[k];
       Object.assign(U, extra);
 
@@ -239,21 +252,57 @@
         this.moshFresh = true;
       }
       U.uSrcRes = srcRes;
+      U.uSrcAspect = this.srcW / this.srcH;
       this._pass(this.progs.signal, cur, U, { uSrc: signalSrc, uPrev: prev.tex });
       this._mips(cur);
 
-      this._pass(this.progs.copy, this.A[0], {}, { uTex: cur.tex });
+      // S-Video or composite: encode the raster onto a subcarrier and decode it again
+      let picture = cur.tex;
+      if (params.composite >= 0.5) {
+        const [wire, decoded] = this.comp;
+        const CU = { ...U, uRes: [wire.w, wire.h] };
+        this._pass(this.progs.compEnc, wire, CU, { uSig: cur.tex });
+        this._pass(this.progs.compDec, decoded, CU, { uComp: wire.tex });
+        this._mips(decoded);
+        picture = decoded.tex;
+      }
+
+      this._pass(this.progs.lincopy, this.A[0], {}, { uTex: picture });
       this._blur(this.A, 1.2, 1);
       this._pass(this.progs.copy, this.B[0], {}, { uTex: this.A[0].tex });
       this._blur(this.B, 2.0, 2);
+      this._pass(this.progs.copy, this.C[0], {}, { uTex: this.B[0].tex });
+      this._blur(this.C, 2.0, 2);
+      this._pass(this.progs.copy, this.D[0], {}, { uTex: this.C[0].tex });
+      this._blur(this.D, 2.0, 2);
 
       U.uOut = [this.outW, this.outH];
       U.uSigRes = [cur.w, cur.h];
       U.uAspect = this.outW / this.outH;
       U.uScale = this.outH / this.expH;
-      this._pass(this.progs.screen, null, U, {
-        uSig: cur.tex, uBlurA: this.A[0].tex, uBlurB: this.B[0].tex, uSrc: this.srcTex,
-      });
+      const tube = {
+        uSig: picture, uBlurA: this.A[0].tex, uBlurB: this.B[0].tex, uBlurC: this.C[0].tex, uBlurD: this.D[0].tex, uSrc: this.srcTex,
+      };
+
+      // a camera filming the tube: its sensor sees the tube at photosite resolution, only while moiré is on
+      U.uSensorRes = [1, 1]; U.uPitchS = 1;
+      let sensorTex = this.srcTex; // bound but unread when the camera is off
+      if (Math.max(params.moire || 0, params.rainbow || 0) > 0.001) {
+        const type = Math.round(params.maskType), ms = params.maskScale;
+        const stripe = (type === 3 ? 0.67 + 0.93 * ms : 1 + 11 * ms * ms) * U.uScale; // maskPitch() in screen-shader.js
+        // two photosites per colour triad, so the Bayer filter's red and blue sites (every other
+        // photosite) sit one triad apart; Density nudges the pitch off so the grids beat in broad bands
+        const pitch = Math.max(1, 1.5 * stripe * (1.002 + 0.08 * params.moirePitch * params.moirePitch));
+        // enough photosites to cover the frame at any camera angle, with room for the lens bend
+        const a = Math.abs(params.moireAngle * Math.PI / 180), c = Math.cos(a), s = Math.sin(a);
+        const w = Math.ceil((this.outW * c + this.outH * s) * 1.12 / pitch) + 4;
+        const h = Math.ceil((this.outW * s + this.outH * c) * 1.12 / pitch) + 4;
+        if (!this.sensor || this.sensor.w !== w || this.sensor.h !== h) { this._free(this.sensor); this.sensor = this._target(w, h, false); }
+        U.uSensorRes = [w, h]; U.uPitchS = pitch;
+        this._pass(this.progs.sensor, this.sensor, U, tube);
+        sensorTex = this.sensor.tex;
+      }
+      this._pass(this.progs.screen, null, U, { ...tube, uSensor: sensorTex });
       this.ping = 1 - this.ping;
       return true;
     }
