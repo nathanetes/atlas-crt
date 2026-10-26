@@ -5,7 +5,7 @@
   const S = window.AtlasShaders;
 
   S.SCREEN = S.COMMON + `
-uniform sampler2D uSig, uBlurA, uBlurB, uSrc;
+uniform sampler2D uSig, uBlurA, uBlurB, uBlurC, uBlurD, uSrc;
 uniform vec2 uOut, uSigRes;
 uniform float uTime, uFrame, uAspect, uSplit, uScale;
 uniform float u_mix, u_bright, u_contrast, u_postGlow, u_halation;
@@ -14,14 +14,27 @@ uniform float u_sync, u_ripple, u_flicker, u_softness, u_pbloom, u_overscan;
 uniform float u_capture, u_shutter, u_pulseContrast, u_bandAngle, u_readout;
 uniform float u_moire, u_rainbow, u_moirePitch, u_moireAngle, u_moireRings;
 uniform float u_conv, u_convAngle, u_pconv;
-uniform float u_glow, u_spectral, u_curve, u_stretch, u_fisheye, u_outside, u_extend, u_vignette, u_tint;
+uniform float u_glow, u_spectral, u_curve, u_stretch, u_fisheye, u_outside, u_extend, u_vignette, u_tint, u_gamut;
+
+// Tube phosphors to the viewer's sRGB display, in linear light, with no adaptation to the white point.
+// SMPTE-C primaries (the P22 set used in NTSC studio monitors): R 0.630,0.340  G 0.310,0.595  B 0.155,0.070.
+// D65 white 0.3127,0.3290; D93 is the CIE daylight locus at 9300 K, 0.2833,0.2973, scaled so its bluish white fits the display.
+const mat3 P22_D65 = mat3(0.9395, 0.0178, -0.0016, 0.0502, 0.9658, -0.0044, 0.0103, 0.0164, 1.0060);
+const mat3 P22_D93 = mat3(0.5845, 0.0111, -0.0010, 0.0378, 0.7270, -0.0033, 0.0103, 0.0164, 1.0043);
 uniform float u_hue, u_sat, u_temp, u_tintGM, u_shHue, u_shAmt, u_hiHue, u_hiAmt, u_lift, u_gamma;
 uniform float u_poster, u_solar, u_gmap, u_cross, u_invert, u_chanSwap, u_grunge, u_crush;
 uniform float u_film, u_filmSize, u_filmColor, u_filmResp, u_filmVar, u_dust, u_weave;
 
+// one scanline of the signal, decoded to the light the beam puts out. Interlaced, the field just
+// scanned glows brighter than the one fading from the frame before (gains average to 1), so detail
+// one line tall flickers at half the field rate: line twitter.
+uniform float uField;
+const float FIELD_NOW = 1.33, FIELD_OLD = 0.67;
 vec3 sigLine(float l, float x) {
   l = clamp(l, 0.0, uSigRes.y - 1.0);
-  return textureLod(uSig, vec2(x, (l + 0.5) / uSigRes.y), 0.0).rgb;
+  vec3 c = toLin(textureLod(uSig, vec2(x, (l + 0.5) / uSigRes.y), 0.0).rgb);
+  if (uField >= 0.0) c *= mod(l, 2.0) == uField ? FIELD_NOW : FIELD_OLD;
+  return c;
 }
 // one scanline's beam: brighter lines draw wider, normalised so average light holds
 vec3 beamW(vec3 c, float d) {
@@ -124,23 +137,45 @@ void main() {
     } else {
       m = maskAt(mfc);
     }
+    // each mask averages to 1 in linear light, so phosphor strength changes texture, not brightness
+    // (measured means: slot 0.832, grille 0.9, delta 0.743, fine slot 0.832, grid 0.956)
+    m /= mtype == 1 ? 0.9 : mtype == 2 ? 0.743 : mtype == 4 ? 0.956 : 0.832;
     // a mask finer than the canvas can show is drawn as its average instead of aliasing
-    m = mix(vec3(0.92), m, smoothstep(0.55, 1.2, maskPitch(mtype)));
-    m = mix(m, vec3(1.0), clamp((lum(col) - 0.55) * 1.5, 0.0, 1.0) * u_pbloom);
+    m = mix(vec3(1.0), m, smoothstep(0.55, 1.2, maskPitch(mtype)));
+    m = mix(m, vec3(1.0), clamp((lum(toGam(col)) - 0.55) * 1.5, 0.0, 1.0) * u_pbloom);
     col *= max(mix(vec3(1.0), m, u_phosphor), 0.0);
   }
 
-  // light spreading in the signal path and the glass; bloom from highlights plus a faint veil
+  // light spreading in the signal path and the glass; bloom from highlights plus a faint veil.
+  // The pyramids hold linear light; thresholds are the old signal levels in linear (0.25 -> 0.047, 0.3 -> 0.071).
+  // GLOW_LIN rescales the glow amounts so the factory looks keep the strength they had in signal values.
+  const float GLOW_LIN = 0.3;
   vec3 bA = texture(uBlurA, suv).rgb;
   vec3 bB = texture(uBlurB, suv).rgb;
-  col += (max(bA - 0.25, 0.0) * 1.1 + bA * 0.1) * u_postGlow;
-  col += (max(bB - 0.3, 0.0) * 1.5 + bB * 0.15) * u_glow;
+  vec3 glowL = (max(bA - 0.047, 0.0) * 1.1 + bA * 0.1) * u_postGlow;
+  // glass glow: a bright core from the 1/8 level plus a long, soft tail from the 1/16 and 1/32
+  // levels, the way light scattering in the faceplate falls off slowly rather than stopping
+  const float GLOW_TAIL = 0.35;
+  vec3 tail = 0.6 * texture(uBlurC, suv).rgb + 0.4 * texture(uBlurD, suv).rgb;
+  glowL += (max(bB - 0.071, 0.0) * 1.5 + bB * 0.15 + tail * GLOW_TAIL) * u_glow;
   if (u_spectral > 0.001) {
     vec2 so = p * 0.02 * u_spectral;
     vec3 sb = vec3(texture(uBlurA, suv + so).r, bA.g, texture(uBlurA, suv - so).b);
-    col += max(sb - 0.25, 0.0) * u_spectral * 1.6 * vec3(1.0, 0.9, 1.2);
+    glowL += max(sb - 0.047, 0.0) * u_spectral * 1.6 * vec3(1.0, 0.9, 1.2);
   }
-  if (u_halation > 0.001) col += bB * vec3(1.0, 0.32, 0.14) * smoothstep(0.35, 1.0, lum(bB)) * u_halation * 1.8;
+  if (u_halation > 0.001) glowL += bB * vec3(1.0, 0.32, 0.14) * smoothstep(0.35, 1.0, lum(toGam(bB))) * u_halation * 1.8;
+  col += glowL * GLOW_LIN;
+
+  // the light leaves the tube in its own phosphor colours
+  int gamut = int(u_gamut + 0.5);
+  if (gamut == 1) col = max(P22_D65 * col, 0.0);
+  else if (gamut == 2) col = max(P22_D93 * col, 0.0);
+
+  // back to display values: the camera, lens and grade below are tuned on these.
+  // TUBE_DRIVE is the set's contrast drive: 1.0 shows the signal's true level, 1.3 keeps
+  // the brightness the factory looks were tuned at before the tube moved to linear light.
+  const float TUBE_DRIVE = 1.3;
+  col = toGam(col * TUBE_DRIVE);
 
   // camera filming the tube: scan pulse against the shutter
   if (u_capture > 0.001) {
@@ -259,6 +294,10 @@ void main() {
   float a = u_outside > 0.5 ? mix(1.0, inside, u_mix) : 1.0;
   col = mix(dry, col * inside, u_mix);
   if (uv.x < uSplit) { col = dry; a = 1.0; }
-  o = vec4(col * a, a);
+
+  // triangular dither of about one 8-bit step, so glow falloff and dark gradients don't band
+  vec2 dq = gl_FragCoord.xy + fract(uFrame * 0.618) * 113.0;
+  col += (hash12(dq) + hash12(dq + 57.3) - 1.0) / 255.0;
+  o = vec4(max(col, 0.0) * a, a);
 }`;
 })();

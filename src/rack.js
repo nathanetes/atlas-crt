@@ -228,7 +228,7 @@
   $('outSize').onchange = (e) => { K.setOut(e.target.value); store('atlas.out', e.target.value); };
 
   // ------------------------------------------------------------ looks
-  let cat = 'Terminal';
+  let cat = CATS[0] || 'Mine';
   const mine = () => store('atlas.looks') || [];
   [...CATS, 'Mine'].forEach((name) => {
     const b = el('button', '', name.toLowerCase());
@@ -320,7 +320,7 @@
     const cur = PRESETS.find((p) => p.name === state.look);
     if (cur) cat = cur.cat;
   } else {
-    applyLook(PRESETS.find((p) => p.name === 'Terminal Glow'));
+    applyLook(PRESETS.find((p) => p.name === 'Terminal Glow') || { name: null, p: {} });
   }
   const q = store('atlas.quality');
   if (q) document.querySelector(`#quality button[data-q="${q}"]`)?.click();

@@ -27,6 +27,9 @@ float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 vec3 hue2rgb(float h) { return clamp(abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0); }
 vec3 triad(float x) { vec3 c = 0.5 + 0.5 * cos(6.2831853 * (x - vec3(0.0, 0.33333, 0.66667))); return c * c; }
+// the signal is gamma-encoded like a real video signal; light (beams, glow) adds up in linear
+vec3 toLin(vec3 c) { return pow(max(c, 0.0), vec3(2.2)); }
+vec3 toGam(vec3 c) { return pow(max(c, 0.0), vec3(1.0 / 2.2)); }
 const mat3 RGB2YIQ = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
 const mat3 YIQ2RGB = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);
 `;
@@ -73,8 +76,8 @@ void main() {
 uniform sampler2D uSrc;
 uniform sampler2D uPrev;
 uniform vec2 uRes, uSrcRes;
-uniform float uTime, uFrame;
-uniform float u_gain, u_chroma, u_hueDrift, u_bleed, u_rgbSplit, u_sharpen;
+uniform float uTime, uFrame, uSrcAspect, uField;
+uniform float u_gain, u_chroma, u_hueDrift, u_bleed, u_rgbSplit, u_sharpen, u_lumaBW;
 uniform float u_bend, u_bendMotion, u_bendFreq, u_bendQ, u_bendBoost, u_bendLo, u_bendHi, u_bendFb, u_bendDelay;
 uniform float u_shake, u_tear, u_roll, u_flash, u_dropout, u_dropStyle, u_hum, u_echo, u_headSwitch, u_topLine;
 uniform float u_rf, u_speckSize, u_grain;
@@ -85,7 +88,29 @@ uniform float u_persistence;
 vec3 src(vec2 uv) { return texture(uSrc, uv).rgb; }
 float srcY(vec2 uv) { return lum(texture(uSrc, uv).rgb); }
 
+// Luma bandwidth of the format, as a horizontal Gaussian low-pass. Resolution is in TV lines (TVL):
+// alternating lines resolvable across a width equal to the picture height, so the cutoff is
+// TVL / 2 cycles per picture height. sigma puts the 50% response at that cutoff.
+// 1 S-VHS ~400 TVL, 2 broadcast NTSC ~330 TVL (4.2 MHz), 3 Betamax ~250 TVL, 4 VHS ~240 TVL.
+float lumaSigma() {
+  int f = int(u_lumaBW + 0.5);
+  float tvl = f == 1 ? 400.0 : f == 2 ? 330.0 : f == 3 ? 250.0 : 240.0;
+  return 0.1874 / (0.5 * tvl * uSrcAspect);   // in uv units across the width
+}
+float lumaLP(vec2 uv, float sigma) {
+  float acc = 0.0, ws = 0.0;
+  for (int k = -4; k <= 4; k++) {
+    float d = float(k) * 0.75, w = exp(-0.5 * d * d);
+    acc += srcY(uv + vec2(d * sigma, 0.0)) * w; ws += w;
+  }
+  return acc / ws;
+}
+
 void main() {
+  // interlaced: this frame scans one field; the other field's rows keep what the last field drew,
+  // so anything that moved between fields is caught at two moments (combing). Decided here but
+  // applied at the end: returning early would break the mip derivatives of neighbouring pixels.
+  bool holdField = uField >= 0.0 && mod(floor(gl_FragCoord.y), 2.0) != uField;
   vec2 uv = vUv;
   float t = uTime, fr = uFrame;
   float lines = uRes.y;
@@ -170,6 +195,10 @@ void main() {
   else if (glitch > 2.5) rgb = floor(rgb * 3.0 + 0.5) / 3.0;
 
   vec3 yiq = RGB2YIQ * rgb;
+  // band-limit luma: take out the detail above the format's cutoff, keeping the damage done above
+  bool bandLimited = u_lumaBW > 0.5;
+  float sigma = bandLimited ? lumaSigma() : 0.0;
+  if (bandLimited) yiq.x += lumaLP(suv, sigma) - srcY(suv);
   if (u_bleed > 0.001) {
     vec2 iq = vec2(0.0);
     float ws = 0.0;
@@ -183,8 +212,16 @@ void main() {
     yiq.yz = mix(yiq.yz, iq / ws, clamp(u_bleed * 1.6, 0.0, 1.0));
   }
   if (u_sharpen > 0.001) {
+    // the deck's detail enhancer; on a band-limited signal it works at the tape's own scale,
+    // so its halos ring at the width real tape halos have
     float px = 1.25 / uRes.x;
-    float yb = 0.5 * (srcY(suv - vec2(px, 0.0)) + srcY(suv + vec2(px, 0.0)));
+    float yb;
+    if (bandLimited) {
+      px = max(px, sigma);
+      yb = 0.5 * (lumaLP(suv - vec2(px, 0.0), sigma) + lumaLP(suv + vec2(px, 0.0), sigma));
+    } else {
+      yb = 0.5 * (srcY(suv - vec2(px, 0.0)) + srcY(suv + vec2(px, 0.0)));
+    }
     yiq.x += (yiq.x - yb) * u_sharpen * 2.5;
   }
 
@@ -216,7 +253,12 @@ void main() {
   yiq.x *= u_gain;
 
   if (u_grain > 0.001) {
-    yiq.x += (hash12(gl_FragCoord.xy + fract(fr * 0.618) * 917.0) - 0.5) * u_grain * 0.22;
+    // tape luma noise runs in horizontal streaks: each line gets its own slow noise along x,
+    // fresh every frame, over a little fine grain. GRAIN_STREAK/FINE keep the old overall strength.
+    const float GRAIN_STREAK = 0.91, GRAIN_FINE = 0.4;
+    float streak = vnoise(vec2(uv.x * 90.0, line + fr * 263.0)) - 0.5;
+    float fine = hash12(gl_FragCoord.xy + fract(fr * 0.618) * 917.0) - 0.5;
+    yiq.x += (streak * GRAIN_STREAK + fine * GRAIN_FINE) * u_grain * 0.22;
     vec2 bp = vec2(uv.x * 28.0, yT * 80.0);
     yiq.yz += (vec2(vnoise(bp + fr * 1.7), vnoise(bp.yx + 13.0 - fr * 1.3)) - 0.5) * u_grain * 0.2;
   }
@@ -273,14 +315,80 @@ void main() {
   }
 
   rgb = mix(rgb, vec3(0.015), blank);
-  rgb = max(rgb, texture(uPrev, vUv).rgb * u_persistence * 0.94);
+  // phosphor afterglow, in linear light. Each phosphor fades at its own rate: in P22 the red
+  // (europium) phosphor glows longest and the blue shortest, so trails behind bright moving
+  // things warm toward red. Green keeps the per-frame decay the single-rate version had.
+  if (u_persistence > 0.001) {
+    vec3 decay = pow(vec3(pow(u_persistence * 0.94, 2.2)), vec3(0.6, 1.0, 1.5));
+    rgb = toGam(max(toLin(rgb), toLin(texture(uPrev, vUv).rgb) * decay));
+  }
   o = vec4(max(rgb, 0.0), 1.0);
+  if (holdField) o = vec4(texelFetch(uPrev, ivec2(gl_FragCoord.xy), 0).rgb, 1.0);
+}`;
+
+  // ---------------------------------------------------------------- composite video
+  // A real NTSC encode and decode of the signal raster. Colour rides on a 3.58 MHz subcarrier
+  // (QAM: I on sine, Q on cosine) added to luma on one wire. The decoder splits them again
+  // with a box filter exactly one subcarrier cycle wide, which is what cheap sets did: fine
+  // luma detail near the subcarrier leaks into chroma (rainbows) and chroma leaks into luma
+  // at colour edges (dot crawl). The subcarrier phase flips half a cycle every line (227.5
+  // cycles per line) and every frame, so the dots crawl.
+  // Approach after Cathode Retro by DeadlyRedCube (https://github.com/DeadlyRedCube/Cathode-Retro),
+  // used under its license; see docs/licenses/cathode-retro.txt.
+  // The composite texture is COMP_W samples wide: 188 subcarrier cycles in an active NTSC line, 4 samples each.
+  const COMPOSITE = `
+const float SPC = 4.0;                   // samples per subcarrier cycle
+float carrier(float x, float line) { return 6.2831853 * (x / SPC + 0.5 * line + 0.5 * uFrame); }
+`;
+
+  // encode: r = luma, g = modulated chroma (kept apart so S-Video can use them separately),
+  // stored around 0.5 so it survives the 8-bit fallback targets
+  const COMP_ENC = COMMON + `
+uniform sampler2D uSig;
+uniform vec2 uRes;
+uniform float uFrame;
+` + COMPOSITE + `
+void main() {
+  vec2 px = floor(vUv * uRes);
+  float line = uRes.y - 1.0 - px.y;
+  vec3 yiq = RGB2YIQ * texture(uSig, vUv).rgb;
+  float ph = carrier(px.x, line);
+  o = vec4(yiq.x, 0.5 + 0.5 * (sin(ph) * yiq.y - cos(ph) * yiq.z), 0.0, 1.0);
+}`;
+
+  // decode: notch luma out with a one-cycle box, demodulate chroma against the carrier over two cycles
+  const COMP_DEC = COMMON + `
+uniform sampler2D uComp;
+uniform vec2 uRes;
+uniform float uFrame, u_composite;
+` + COMPOSITE + `
+vec2 at(float x, float y) { vec2 s = texelFetch(uComp, ivec2(clamp(x, 0.0, uRes.x - 1.0), y), 0).rg; return vec2(s.r, s.g * 2.0 - 1.0); }
+float wire(float x, float y) { vec2 s = at(x, y); return s.r + s.g; }   // composite: luma and chroma on one wire
+float notchY(float x, float y) { return 0.25 * (wire(x - 2.0, y) + wire(x - 1.0, y) + wire(x, y) + wire(x + 1.0, y)); }
+void main() {
+  vec2 px = floor(vUv * uRes);
+  float line = uRes.y - 1.0 - px.y;
+  bool comp = u_composite > 1.5;
+  float Y = comp ? notchY(px.x, px.y) : at(px.x, px.y).r;
+  vec2 iq = vec2(0.0);
+  for (int k = -4; k < 4; k++) {
+    float x = px.x + float(k);
+    float c = comp ? wire(x, px.y) - notchY(x, px.y) : at(x, px.y).g;
+    float ph = carrier(x, line);
+    iq += c * vec2(sin(ph), -cos(ph));
+  }
+  o = vec4(YIQ2RGB * vec3(Y, iq * 0.25), 1.0);   // 2 / 8 taps: the sin^2 average is one half
 }`;
 
   // ---------------------------------------------------------------- glow
   const COPY = COMMON + `
 uniform sampler2D uTex;
 void main() { o = vec4(texture(uTex, vUv).rgb, 1.0); }`;
+
+  // copy into linear light, so the glow pyramid blurs light rather than signal values
+  const LINCOPY = COMMON + `
+uniform sampler2D uTex;
+void main() { o = vec4(toLin(texture(uTex, vUv).rgb), 1.0); }`;
 
   const BLUR = COMMON + `
 uniform sampler2D uTex;
@@ -292,5 +400,5 @@ void main() {
   o = vec4(c, 1.0);
 }`;
 
-  window.AtlasShaders = { VERT, COMMON, MOSH, SIGNAL, COPY, BLUR };
+  window.AtlasShaders = { VERT, COMMON, MOSH, SIGNAL, COMP_ENC, COMP_DEC, COPY, LINCOPY, BLUR };
 })();
