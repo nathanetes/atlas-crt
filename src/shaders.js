@@ -32,6 +32,15 @@ vec3 toLin(vec3 c) { return pow(max(c, 0.0), vec3(2.2)); }
 vec3 toGam(vec3 c) { return pow(max(c, 0.0), vec3(1.0 / 2.2)); }
 const mat3 RGB2YIQ = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
 const mat3 YIQ2RGB = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);
+// the basic grade, shared by Pre Grade and Post Grade, on gamma-encoded colour: exposure in stops
+// (on linear light), contrast around mid-grey, brightness, hue, saturation, then white balance
+vec3 basicGrade(vec3 c, float ev, float br, float co, float sa, float te, float ti, float hu) {
+  if (abs(ev) > 0.001) c = toGam(toLin(c) * exp2(ev));
+  c = max((c - 0.5) * co + 0.5 + br, 0.0);
+  if (abs(hu) > 0.5) { vec3 y = RGB2YIQ * c; y.yz = rot(radians(hu)) * y.yz; c = YIQ2RGB * y; }
+  c = max(mix(vec3(lum(c)), c, sa), 0.0);
+  return c * vec3(1.0 + 0.22 * te, 1.0 - 0.18 * ti, 1.0 - 0.22 * te);
+}
 `;
 
   // ---------------------------------------------------------------- datamosh
@@ -80,7 +89,7 @@ uniform float uTime, uFrame, uSrcAspect, uField;
 uniform float u_gain, u_chroma, u_hueDrift, u_bleed, u_rgbSplit, u_sharpen, u_lumaBW;
 uniform float u_bend, u_bendMotion, u_bendFreq, u_bendQ, u_bendBoost, u_bendLo, u_bendHi, u_bendFb, u_bendDelay;
 uniform float u_shake, u_tear, u_roll, u_flash, u_dropout, u_dropStyle, u_hum, u_echo, u_headSwitch, u_topLine;
-uniform float u_rf, u_speckSize, u_grain;
+uniform float u_rf, u_speckSize, u_speckOpacity, u_grain;
 uniform float u_waves, u_waveCount, u_waveReact, u_waveSmooth, u_waveOrient, u_waveColor, u_waveDir, u_waveBlend;
 uniform float u_blockGlitch, u_slices, u_smear, u_smearThresh, u_compress;
 uniform float u_persistence;
@@ -289,8 +298,8 @@ void main() {
     float cs = mix(1.0, 5.0, u_speckSize);
     vec2 cell = floor(vec2(uv.x * uRes.x / (cs * 3.0), yT * lines / cs));
     float sp = step(1.0 - u_rf * 0.04, hash12(cell + vec2(fr * 13.1, fr * 7.7)));
-    rgb = mix(rgb, vec3(step(0.35, hash12(cell * 1.7 + fr))), sp);
-    rgb = mix(rgb, vec3(hash12(gl_FragCoord.xy * 1.3 + fr * 31.0)), u_rf * u_rf * 0.35);
+    rgb = mix(rgb, vec3(step(0.35, hash12(cell * 1.7 + fr))), sp * u_speckOpacity);
+    rgb = mix(rgb, vec3(hash12(gl_FragCoord.xy * 1.3 + fr * 31.0)), u_rf * u_rf * 0.35 * u_speckOpacity);
   }
   if (u_hum > 0.001) {
     float hb = smoothstep(0.5, 1.0, 0.5 + 0.5 * sin(6.2831853 * (yT - t * 0.17)));
@@ -381,6 +390,16 @@ void main() {
 }`;
 
   // ---------------------------------------------------------------- glow
+  // ---------------------------------------------------------------- pre grade
+  // the source graded before it reaches the tube, so the signal, beams and glow all see the graded picture
+  const PREGRADE = COMMON + `
+uniform sampler2D uTex;
+uniform float u_preExp, u_preBright, u_preContrast, u_preSat, u_preTemp, u_preTint, u_preHue;
+void main() {
+  vec3 c = texture(uTex, vUv).rgb;
+  o = vec4(basicGrade(c, u_preExp, u_preBright, u_preContrast, u_preSat, u_preTemp, u_preTint, u_preHue), 1.0);
+}`;
+
   const COPY = COMMON + `
 uniform sampler2D uTex;
 void main() { o = vec4(texture(uTex, vUv).rgb, 1.0); }`;
@@ -400,5 +419,5 @@ void main() {
   o = vec4(c, 1.0);
 }`;
 
-  window.AtlasShaders = { VERT, COMMON, MOSH, SIGNAL, COMP_ENC, COMP_DEC, COPY, LINCOPY, BLUR };
+  window.AtlasShaders = { VERT, COMMON, MOSH, SIGNAL, COMP_ENC, COMP_DEC, PREGRADE, COPY, LINCOPY, BLUR };
 })();

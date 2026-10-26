@@ -34,15 +34,16 @@ Click **~** next to any slider to automate it. The slider then swings around the
 
 | Module | What it does |
 | --- | --- |
+| Pre Grade | Exposure, brightness, contrast, saturation, temperature, tint and hue on the source, before it reaches the tube |
 | Color Signal | Signal path (RGB, S-Video or composite), luma bandwidth, brightness gain, chroma level, hue drift, chroma bleed, RGB split, sharpening, post glow, halation |
-| Grade | Hue shift, saturation, temperature, tint, shadow and highlight toning, gradient map, cross process, black level, gamma, solarize, posterize, invert, channel swap, grunge |
+| Post Grade | Exposure, brightness, contrast, saturation, hue shift, temperature and tint on the finished picture, then shadow and highlight toning, gradient map, cross process, black level, gamma, solarize, posterize, invert, channel swap, grunge |
 | Corrupt | Datamosh (block size, motion gain, drift, keyframes, residual), block glitch, slice shift, pixel smear, compression, bit crush |
 | Circuit Bend | A resonant stage that rings after edges and folds over. Frequency (MHz), Q, boost (dB), thresholds (IRE), feedback |
 | Damage | Shake, tear, vertical roll, exposure flash, dropouts (5 styles), hum band, signal echo, head-switch band, top-line noise |
-| Noise & Film | Film grain with size, mono-to-RGB color, shadow-to-highlight response and variation (clumping and breathing), dust and scratches, gate weave, tape grain in horizontal streaks, reception specks |
+| Noise & Film | Film grain with size, mono-to-RGB color, shadow-to-highlight response and variation (clumping and breathing), dust and scratches with their own opacity, gate weave, tape grain in horizontal streaks, reception specks with their own opacity |
 | Waves | Modulation bands with count, picture reaction, smoothing, direction and blend mode |
 | Screen | Phosphor color, tube gamut, 5 mask types, mask scale (up to 36px triads) and phosphor strength (above 1 the gaps go black), scanlines, refresh rate, persistence, sync, supply ripple, flicker, beam softness, phosphor bloom, overscan |
-| Capture | A camera sensor beating against the curved grille: rainbow moiré and moiré bands with density, angle and rings. Plus the scan pulse: shutter against refresh, band angle, rolling-shutter readout |
+| Capture | Rainbow moiré and moiré bands, drawn over the whole tube face like a camera filming it, with coverage (how far they reach into dark areas), density, angle, rings and drift. Works with or without a phosphor mask. Plus the scan pulse: shutter against refresh, band angle, rolling-shutter readout |
 | Convergence | Red, green and blue beams landing out of register |
 | Glass & Optics | Glow with a long, soft tail, spectral bloom, curvature, vignette, line stretch, fisheye, transparent outside area |
 
@@ -80,11 +81,12 @@ Looks don't change the raster, so pick **480i** yourself for interlaced footage.
 
 Each frame runs through these stages:
 
-1. **Datamosh** (only when it's on). The frame is split into blocks. Each block either refreshes from the new frame or drags the previous moshed frame along a motion vector estimated from the last two frames.
-2. **Signal.** The source is drawn into a low-resolution raster in YIQ color, like a video signal. Luma band-limiting, timing errors, slices, macroblock glitches, compression, pixel smear, chroma bleed, circuit bending, dropouts, noise and waves happen here. The previous frame feeds back for phosphor persistence. In 480i, each frame redraws only one field and keeps the other from the frame before.
-3. **Composite** (only with S-Video or Composite selected). The raster is encoded onto a color subcarrier at 752 samples per line (188 subcarrier cycles, 4 samples each) and decoded again, which produces cross-color and dot crawl.
-4. **Glow.** The picture is converted to linear light, downsampled and blurred at four sizes (1/4, 1/8, 1/16 and 1/32 of the output), which feed the glow, its long tail, halation and bloom.
-5. **Screen.** The tube is drawn at output resolution in linear light, so light adds up as it does on a real screen: curvature and overscan, a beam per scanline that widens on bright lines, convergence error, the phosphor mask, glow and the tube gamut. The result is converted back to display values for the camera scan pulse, sensor moiré, the grade, creative color, monochrome phosphor tint, film grain, dust and bit crush, and a light dither keeps dark gradients from banding.
+1. **Pre grade** (only when it changes something). The source is graded before anything else sees it.
+2. **Datamosh** (only when it's on). The frame is split into blocks. Each block either refreshes from the new frame or drags the previous moshed frame along a motion vector estimated from the last two frames.
+3. **Signal.** The source is drawn into a low-resolution raster in YIQ color, like a video signal. Luma band-limiting, timing errors, slices, macroblock glitches, compression, pixel smear, chroma bleed, circuit bending, dropouts, noise and waves happen here. The previous frame feeds back for phosphor persistence. In 480i, each frame redraws only one field and keeps the other from the frame before.
+4. **Composite** (only with S-Video or Composite selected). The raster is encoded onto a color subcarrier at 752 samples per line (188 subcarrier cycles, 4 samples each) and decoded again, which produces cross-color and dot crawl.
+5. **Glow.** The picture is converted to linear light, downsampled and blurred at four sizes (1/4, 1/8, 1/16 and 1/32 of the output), which feed the glow, its long tail, halation and bloom.
+6. **Screen.** The tube is drawn at output resolution in linear light, so light adds up as it does on a real screen: curvature and overscan, a beam per scanline that widens on bright lines, convergence error, the phosphor mask, glow and the tube gamut. The result is converted back to display values for the moiré overlay, the camera scan pulse, the post grade, creative color, monochrome phosphor tint, film grain, dust and bit crush, and a light dither keeps dark gradients from banding.
 
 Masks finer than a screen pixel are drawn as their average in the fitted preview, so it never shows aliasing that the export won't have.
 
