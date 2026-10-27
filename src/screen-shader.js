@@ -13,7 +13,7 @@ uniform float u_mix, u_bright, u_contrast, u_postGlow, u_halation;
 uniform float u_maskType, u_maskScale, u_phosphor, u_scanlines, u_refresh, u_persistence;
 uniform float u_sync, u_ripple, u_flicker, u_softness, u_pbloom, u_overscan;
 uniform float u_capture, u_shutter, u_pulseContrast, u_bandAngle, u_readout;
-uniform float u_moire, u_rainbow, u_moireScale, u_moireGrid, u_moireCells, u_moireColor, u_moireCover, u_moirePitch, u_moireAngle, u_moireRings, u_moireDrift;
+uniform float u_moire, u_rainbow, u_moireScale, u_moireGrid, u_moireCells, u_moireColor, u_moireCover, u_moireCurve, u_moireView, u_moirePitch, u_moireAngle, u_moireRings, u_moireDrift;
 uniform float u_conv, u_convAngle, u_pconv;
 uniform float u_glow, u_spectral, u_curve, u_stretch, u_fisheye, u_outside, u_extend, u_vignette, u_tint, u_gamut;
 
@@ -225,8 +225,8 @@ vec3 gamutOf(vec3 col) {
 
 // ---------------------------------------------------------------- the camera
 // Moiré is what a camera records when it photographs a tube: two grids beating against each other.
-// One is the phosphor grid, drawn on the curved glass; the other is the camera's sensor, a flat grid
-// of photosites turned by Angle and bent by the lens (Rings). Each photosite averages the light over
+// One is the phosphor grid, laid evenly along the curved glass; the other is the camera's sensor, a
+// flat grid of photosites turned by Angle and bent by the lens (Rings). Each photosite averages the light over
 // its area, so wherever the two grids nearly line up, that average swings slowly from one triad to the
 // next: fringes that bend with the glass and the lens. Behind the Bayer colour filter each photosite
 // sees only red, green or blue, so the red and blue sites form grids one triad apart and the fringes
@@ -272,20 +272,53 @@ vec3 cameraView(vec2 fc) {
   vec2 s = expToSensor(fc * uExpRes / uOut);
   return texture(uCamera, (s + uSensorRes * 0.5) / uSensorRes).rgb;
 }
-// the grid the camera photographs at a face point, averaged over a footprint fp export pixels wide;
 // Moiré Grid: Pixel Grid, Aperture Grille, Slot Mask, Delta Dot, or the Screen's own mask
 int cameraGridType() {
   int g = int(u_moireGrid + 0.5);
   return g == 0 ? 4 : g == 1 ? 1 : g == 2 ? 0 : g == 3 ? 2 : int(u_maskType + 0.5);
 }
-vec3 cameraGrid(Face F, float fp) {
-  int type = cameraGridType();
-  return maskAtU(F.suv * uExpRes, fp, type, uCamStripe) / maskMean(type);
+
+// ---------------------------------------------------------------- the glass, as the camera sees it
+// The grid sits on the tube's glass: a sphere bulging toward the camera, or for an aperture grille a
+// cylinder curved only across, as on a Trinitron. The camera films it from close up. A ray that would
+// cross a flat screen at n carries on to where the curved glass is, which is further back (the sag of
+// the curve) and so further out; and the grid is laid evenly along the curved surface, not across the
+// flat frame. Both stretch the grid's pitch as the camera sees it, a little at the centre and more
+// toward the edges and corners. Against the sensor's even grid, that chirp is what bends the fringes
+// into curves and packs them tighter toward the edges. Tube Curvature sets the radius (or the Glass
+// Curve, whichever is more curved); Camera Position moves the camera off to one side, so the warp
+// turns lopsided. Distances are in half picture heights, with the camera CAM_DIST of them away.
+const float CAM_DIST = 3.0;
+vec2 glassAt(vec2 e, bool cylinder, out float stretch) {
+  vec2 n = (e - uExpRes * 0.5) / (uExpRes.y * 0.5);
+  float k = 0.36 * max(u_moireCurve, u_curve);           // curvature: 1 / radius; 0.36 keeps the corners on the glass
+  vec2 cam = vec2(1.5 * u_moireView, 0.0);
+  vec2 x = n;
+  float z = 0.0;
+  for (int i = 0; i < 4; i++) {                          // the ray meets the curve: a few fixed-point steps
+    float r2 = cylinder ? x.x * x.x : dot(x, x);
+    z = k * r2 / (1.0 + sqrt(max(1.0 - k * k * r2, 0.0)));   // sag, stable as the radius grows
+    x = n + (n - cam) * z / CAM_DIST;
+  }
+  stretch = 1.0 + z / CAM_DIST;
+  vec2 a = clamp(x * k, -1.0, 1.0);                      // distance along the curved surface
+  vec2 arc = vec2(abs(a.x) > 1e-4 ? asin(a.x) / k : x.x,
+                  !cylinder && abs(a.y) > 1e-4 ? asin(a.y) / k : x.y);
+  return uExpRes * 0.5 + arc * uExpRes.y * 0.5;          // back in export pixels
 }
-// the same grid's cells at this canvas's resolution, anti-aliased over one pixel
-vec3 cameraCells(Face F) {
+// the grid the camera photographs at export pixel e, averaged over a footprint fp export pixels wide
+vec3 cameraGrid(vec2 e, float fp) {
   int type = cameraGridType();
-  return maskAtU(F.suv * uOut, 1.0, type, uCamStripe * uScale) / maskMean(type);
+  float stretch;
+  vec2 g = glassAt(e, type == 1, stretch);
+  return maskAtU(g, fp * stretch, type, uCamStripe) / maskMean(type);
+}
+// the same grid's cells at canvas pixel fc, anti-aliased over one pixel
+vec3 cameraCells(vec2 fc) {
+  int type = cameraGridType();
+  float stretch;
+  vec2 g = glassAt(fc * uExpRes / uOut, type == 1, stretch);
+  return maskAtU(g * uScale, stretch, type, uCamStripe * uScale) / maskMean(type);
 }
 
 #ifdef DEMOSAIC
@@ -310,14 +343,14 @@ void main() {
 // strong fringes instead of averaging away.
 void main() {
   vec2 s = floor(gl_FragCoord.xy) + 0.5 - uSensorRes * 0.5;
-  Face C = faceAt(clamp(sensorToExp(s) / uExpRes, 0.0, 1.0));
-  float lines = 0.0;
+  bool cyl = cameraGridType() == 1;
+  float lines = 0.0, stretch;
   for (int j = 0; j < 3; j++) {
-    vec2 uv = clamp(sensorToExp(s + vec2(0.0, (float(j) + 0.5) / 3.0 - 0.5)) / uExpRes, 0.0, 1.0);
-    lines += lineProfile(faceAt(uv).suv, uExpRes.y);
+    vec2 g = glassAt(sensorToExp(s + vec2(0.0, (float(j) + 0.5) / 3.0 - 0.5)), cyl, stretch);
+    lines += lineProfile(clamp(g / uExpRes, 0.0, 1.0), uExpRes.y);
   }
   const float SITE_APERTURE = 0.4;
-  o = vec4(cameraGrid(C, uPitchS * SITE_APERTURE) * lines / 3.0, 1.0);
+  o = vec4(cameraGrid(sensorToExp(s), uPitchS * SITE_APERTURE) * lines / 3.0, 1.0);
 }
 #else
 void main() {
@@ -337,7 +370,7 @@ void main() {
   float cam = max(u_moire, u_rainbow);
   if (cam > 0.001) {
     vec3 fringes = cameraView(gl_FragCoord.xy);
-    vec3 cells = mix(vec3(1.0), cameraCells(F), u_moireCells) * lineProfile(suv, uOut.y);
+    vec3 cells = mix(vec3(1.0), cameraCells(gl_FragCoord.xy), u_moireCells) * lineProfile(suv, uOut.y);
     vec3 seen = (beamLight(F, true) + vec3(ROOM_LIGHT * u_moireCover)) * fringes * cells * inside + glowL;
     col = mix(col, gamutOf(seen), cam);
   }
