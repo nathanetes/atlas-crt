@@ -27,7 +27,7 @@
     split: 0.5,
     compare: false,
     playing: true,
-    auto: {}, // key -> { shape, rate (Hz), depth (0..1 of the range), phase, seed }
+    auto: {}, // key -> { keys: [{ t (seconds on the timeline), v, ease: [x1, y1, x2, y2] or 'hold' }] }
   });
   let clock = 0, frame = 0, last = performance.now();
 
@@ -54,32 +54,56 @@
     } catch (e) { return null; }
   }
 
-  // ------------------------------------------------------------ automation
-  // Each automated slider swings around its set value; time is the effect clock, so
-  // exports repeat exactly what the preview showed.
-  const frac = (x) => x - Math.floor(x);
-  const rnd = (n, seed) => frac(Math.sin(n * 127.1 + seed * 311.7) * 43758.5453);
-  const WAVES = {
-    sine: (x) => Math.sin(x * 2 * Math.PI),
-    triangle: (x) => 1 - 4 * Math.abs(frac(x + 0.25) - 0.5),
-    saw: (x) => 2 * frac(x) - 1,
-    square: (x) => (frac(x) < 0.5 ? 1 : -1),
-    random: (x, s) => rnd(Math.floor(x), s) * 2 - 1,
-    drift: (x, s) => {
-      const i = Math.floor(x), f = frac(x), e = f * f * (3 - 2 * f);
-      return (rnd(i, s) * (1 - e) + rnd(i + 1, s) * e) * 2 - 1;
-    },
+  // ------------------------------------------------------------ keyframes
+  // An automated control follows its keyframes along the timeline: the video's own time, or for
+  // photos and the test card a timeline that loops (10 s, or longer to fit the last keyframe).
+  // Between two keyframes the value moves along the first one's curve, a cubic Bézier from (0,0) to
+  // (1,1) as in CSS easing (x is time, y is progress, so y may overshoot); 'hold' keeps the value
+  // until the next keyframe. Exports run on the same timeline, so they repeat the preview.
+  let tl = 0; // the timeline for photos and the test card, in seconds
+  K.timelineLength = () => {
+    if (src.kind === 'video') return src.el.duration || 1;
+    let end = 0;
+    for (const k in state.auto) for (const key of state.auto[k].keys || []) end = Math.max(end, key.t);
+    return Math.max(10, Math.ceil(end + 1));
   };
-  K.WAVES = Object.keys(WAVES);
+  K.timeNow = () => (src.kind === 'video' ? src.el.currentTime : tl);
+  K.seek = (t) => {
+    t = Math.max(0, Math.min(t, K.timelineLength()));
+    if (src.kind === 'video') src.el.currentTime = t;
+    else tl = t;
+  };
+
+  // progress at time fraction u (0..1) along a keyframe's curve
+  K.ease = function (e, u) {
+    if (e === 'hold') return 0;
+    const [x1, y1, x2, y2] = e;
+    const bez = (a1, a2, s) => 3 * a1 * s * (1 - s) * (1 - s) + 3 * a2 * s * s * (1 - s) + s * s * s;
+    let lo = 0, hi = 1, s = u;
+    for (let i = 0; i < 20; i++) { // x rises steadily with s while x1 and x2 stay in 0..1, so bisect for it
+      s = (lo + hi) / 2;
+      if (bez(x1, x2, s) < u) lo = s; else hi = s;
+    }
+    return bez(y1, y2, s);
+  };
+  K.valueAt = function (keys, t) {
+    if (t <= keys[0].t) return keys[0].v;
+    for (let i = 0; i < keys.length - 1; i++) {
+      const a = keys[i], b = keys[i + 1];
+      if (t < b.t) return a.v + (b.v - a.v) * K.ease(a.ease, (t - a.t) / Math.max(b.t - a.t, 1e-6));
+    }
+    return keys[keys.length - 1].v;
+  };
   K.live = {};
 
-  K.effective = function (time = clock) {
+  K.effective = function () {
     const p = { ...state.params };
     const clamp = (c, v) => Math.min(c.max, Math.max(c.min, v));
+    const t = K.timeNow();
     for (const k in state.auto) {
-      const a = state.auto[k], c = BY_KEY[k];
-      if (!c || c.opts) continue;
-      p[k] = clamp(c, p[k] + (c.max - c.min) * 0.5 * a.depth * WAVES[a.shape](time * a.rate + a.phase, a.seed));
+      const keys = state.auto[k].keys, c = BY_KEY[k];
+      if (!c || c.opts || !keys || !keys.length) continue;
+      p[k] = clamp(c, K.valueAt(keys, t));
       K.live[k] = p[k];
     }
     for (const m of MACROS) {
@@ -280,7 +304,10 @@
     last = now;
     if (!src.el) return;
     const running = state.playing || K.recording;
-    if (running) { clock += dt; frame++; }
+    if (running) {
+      clock += dt; frame++;
+      if (src.kind !== 'video') tl = (tl + dt) % K.timelineLength();
+    }
     if (src.kind === 'sample' && running) src.el.draw(clock);
     const split = state.compare && !K.recording ? state.split : -1;
     engine.render(K.effective(), clock, frame, { uSplit: split });
@@ -292,7 +319,7 @@
   // ------------------------------------------------------------ transport
   function syncTransport() {
     $('playBtn').textContent = state.playing ? 'pause' : 'play';
-    $('scrub').disabled = src.kind !== 'video';
+    $('scrub').disabled = !src.el;
     $('muteBtn').disabled = src.kind !== 'video';
   }
   K.syncTransport = syncTransport;
@@ -310,9 +337,9 @@
 
   let scrubbing = false;
   $('scrub').addEventListener('input', (e) => {
-    if (src.kind !== 'video' || !src.el.duration) return;
+    if (!src.el) return;
     scrubbing = true;
-    src.el.currentTime = (e.target.value / 1000) * src.el.duration;
+    K.seek((e.target.value / 1000) * K.timelineLength());
     paintScrub();
   });
   $('scrub').addEventListener('change', () => { scrubbing = false; });
@@ -322,13 +349,9 @@
     s.style.setProperty('--pct', (s.value / 10) + '%');
   }
   function updateTime() {
-    if (src.kind === 'video' && src.el.duration) {
-      if (!scrubbing) $('scrub').value = Math.round((src.el.currentTime / src.el.duration) * 1000);
-      $('time').textContent = fmtTime(src.el.currentTime) + ' / ' + fmtTime(src.el.duration);
-    } else {
-      $('scrub').value = 0;
-      $('time').textContent = src.kind === 'image' ? 'still' : 'live';
-    }
+    const len = K.timelineLength(), t = K.timeNow();
+    if (!scrubbing) $('scrub').value = Math.round((t / len) * 1000);
+    $('time').textContent = fmtTime(t) + ' / ' + fmtTime(len);
     paintScrub();
   }
 

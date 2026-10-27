@@ -26,9 +26,13 @@ You can access the latest release there.
 
 **Raster** (under render on the looks tab) sets the resolution of the simulated signal: LO is 120 lines, SD is 240, HI is 480, and FULL works at the source resolution. **480i** is 480 lines drawn as two interlaced fields, one per frame: anything moving shows combing on its edges, and detail one line tall flickers (line twitter), as on an interlaced TV. Exports get one field per frame too. **Out** sets the export size. The preview renders at screen resolution, so use 100% to check fine detail like the phosphor mask.
 
-### Automation
+### Keyframes
 
-Click **~** next to any slider to automate it. The slider then swings around the value you set, with a shape (sine, triangle, saw, square, random or drift), a rate from 0.02 to 10 Hz, and a depth. A marker on the slider shows the value being rendered right now. Automation runs on the effect clock, so exports match the preview, and saved looks keep it. The adjust tab lists everything that's automated.
+Click **◆** next to any slider to keyframe it. A lane opens under the slider with its keyframes and the playhead. Move the playhead (with the scrub bar, or by clicking the lane), set the slider, and that value is keyed there. Dragging a slider while the clip plays edits a single keyframe. Click a keyframe to jump to it, drag it to retime it, use **<** and **>** to step between keyframes, **key** to key the current value, and **del** to remove the selected one.
+
+The curve under the lane shapes the move from the selected keyframe to the next. Drag its two handles (a cubic Bézier, as in CSS easing) or pick a preset: ease in-out, linear, ease in, ease out, snap, overshoot or hold. The solid line is the value over the move, and the dashed line is its speed.
+
+Videos keyframe on their own time. Photos and the test card get a timeline that loops every 10 seconds, or longer to fit the last keyframe. Exports play the same timeline from the start, and saved looks keep their keyframes. The adjust tab lists every keyframed control, and **stop** removes a control's keyframes and keeps the value it was showing.
 
 ## Modules
 
@@ -43,7 +47,7 @@ Click **~** next to any slider to automate it. The slider then swings around the
 | Noise & Film | Film grain with size, mono-to-RGB color, shadow-to-highlight response and variation (clumping and breathing), dust and scratches with their own opacity, gate weave, tape grain in horizontal streaks, reception specks with their own opacity |
 | Waves | Modulation bands with count, picture reaction, smoothing, direction and blend mode |
 | Screen | Phosphor color, tube gamut, 5 mask types, mask scale (up to 36px triads) and phosphor strength (above 1 the gaps go black), scanlines, refresh rate, persistence, sync, supply ripple, flicker, beam softness, phosphor bloom, overscan |
-| Capture | A camera filming the tube. Its sensor beats against a grid on the curved glass, so the rainbow fringes warp with the glass and the lens: rainbow moiré, moiré bands, moiré scale (single pixels to chunky), grid pattern, pixel visibility, moiré color, coverage (room light that carries the fringes into dark areas), density, angle, rings and drift. Works with or without the Screen mask. Plus the scan pulse: shutter against refresh, band angle, rolling-shutter readout |
+| Capture | A camera filming the tube. Its sensor beats against a grid on the curved glass, so the rainbow fringes warp with the glass and the lens: rainbow moiré, moiré bands, moiré scale (single pixels to chunky), grid pattern, pixel visibility, moiré color, coverage (room light that carries the fringes into dark areas), tube curvature (how far the glass bulges toward the camera, which bends the fringes into rings toward the sides), camera position (left to right), density, angle, rings and drift. Works with or without the Screen mask. Plus the scan pulse: shutter against refresh, band angle, rolling-shutter readout |
 | Convergence | Red, green and blue beams landing out of register |
 | Glass & Optics | Glow with a long, soft tail, spectral bloom, curvature, vignette, line stretch, fisheye, transparent outside area |
 
@@ -67,7 +71,7 @@ Each module has its own on/off switch and reset.
 - **Color:** Teal Night, Cross Processed, Duotone, Bleach Bypass
 - **Glitch:** Datamosh Bloom, Bent Circuit, Loose Cable, Chroma Storm, Feedback Bloom, Lost Sync
 
-Looks don't change the raster, so pick **480i** yourself for interlaced footage. Save your own looks under **mine**. Saved looks keep settings and automation, and live in your browser's local storage. The looks from before the linear-light renderer are kept for reference in `docs/presets-pre-linear.js`; the app doesn't load them.
+Looks don't change the raster, so pick **480i** yourself for interlaced footage. Save your own looks under **mine**. Saved looks keep settings and keyframes, and live in your browser's local storage. The looks from before the linear-light renderer are kept for reference in `docs/presets-pre-linear.js`; the app doesn't load them.
 
 ## Exporting
 
@@ -86,7 +90,7 @@ Each frame runs through these stages:
 3. **Signal.** The source is drawn into a low-resolution raster in YIQ color, like a video signal. Luma band-limiting, timing errors, slices, macroblock glitches, compression, pixel smear, chroma bleed, circuit bending, dropouts, noise and waves happen here. The previous frame feeds back for phosphor persistence. In 480i, each frame redraws only one field and keeps the other from the frame before.
 4. **Composite** (only with S-Video or Composite selected). The raster is encoded onto a color subcarrier at 752 samples per line (188 subcarrier cycles, 4 samples each) and decoded again, which produces cross-color and dot crawl.
 5. **Glow.** The picture is converted to linear light, downsampled and blurred at four sizes (1/4, 1/8, 1/16 and 1/32 of the output), which feed the glow, its long tail, halation and bloom.
-6. **Screen.** The tube is drawn at output resolution in linear light, so light adds up as it does on a real screen: curvature and overscan, a beam per scanline that widens on bright lines, convergence error, the phosphor mask, glow and the tube gamut. Where moiré is on, a camera at export resolution photographs the grid and raster lines through a Bayer filter, and that photo multiplies the picture. The result is converted back to display values for the camera scan pulse, the post grade, creative color, monochrome phosphor tint, film grain, dust and bit crush, and a light dither keeps dark gradients from banding.
+6. **Screen.** The tube is drawn at output resolution in linear light, so light adds up as it does on a real screen: curvature and overscan, a beam per scanline that widens on bright lines, convergence error, the phosphor mask, glow and the tube gamut. Where moiré is on, a camera at export resolution photographs the grid and raster lines through a Bayer filter, and that photo multiplies the picture. Each photosite traces a ray to the curved glass (a sphere, or a cylinder for an aperture grille) and reads the grid where the ray lands, measured along the glass. The result is converted back to display values for the camera scan pulse, the post grade, creative color, monochrome phosphor tint, film grain, dust and bit crush, and a light dither keeps dark gradients from banding.
 
 Masks finer than a screen pixel are drawn as their average in the fitted preview, so it never shows aliasing that the export won't have.
 
@@ -98,8 +102,8 @@ src/shaders.js        GLSL for the datamosh, signal, composite and blur passes
 src/screen-shader.js  GLSL for the screen pass, grade and film
 src/engine.js         WebGL2 setup, render targets and the pass order
 src/params.js         every control (range, default), the quick macros and the looks
-src/app.js            automation, media loading, render loop, transport
-src/rack.js           the control panel: tabs, macros, modules, automation, saved looks
+src/app.js            keyframes and the timeline, media loading, render loop, transport
+src/rack.js           the control panel: tabs, macros, modules, keyframe lanes and curves, saved looks
 src/export.js         PNG stills and video recording
 docs/                 images for this README, the previous factory looks, third-party licenses
 ```
@@ -112,7 +116,7 @@ Add an entry to `PRESETS` in `src/params.js`, and add its group name to `CATS` i
 { cat: 'TV', name: 'My Look', p: { curve: 0.4, glow: 0.5, scanlines: 0.7, maskType: 2 } },
 ```
 
-Control keys and their ranges are listed at the top of `src/params.js`. A look can also carry automation, as `auto: { glow: { shape: 'sine', rate: 0.5, depth: 0.3, phase: 0, seed: 1 } }`.
+Control keys and their ranges are listed at the top of `src/params.js`. A look can also carry keyframes, as `auto: { glow: { keys: [{ t: 0, v: 0.2, ease: [0.42, 0, 0.58, 1] }, { t: 4, v: 0.8, ease: 'hold' }] } }`. `t` is in seconds, and `ease` is the curve out of that keyframe: the two handles of a cubic Bézier, or `'hold'`.
 
 ## Browser support
 

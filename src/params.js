@@ -181,6 +181,8 @@
         { k: 'moireCover', l: 'Moiré Coverage', min: 0, max: 1, step: 0.01, d: 0.4, u: 'room light: lit areas → whole frame' },
         { k: 'moirePitch', l: 'Moiré Density', min: 0, max: 1, step: 0.01, d: 0.35 },
         { k: 'moireAngle', l: 'Moiré Angle', min: -45, max: 45, step: 0.1, d: 0, u: '°' },
+        { k: 'moireCurve', l: 'Tube Curvature', min: 0, max: 1, step: 0.01, d: 0.65 },
+        { k: 'moireView', l: 'Camera Position', min: -1, max: 1, step: 0.01, d: 0, u: 'left → right' },
         { k: 'moireRings', l: 'Moiré Rings', min: -1, max: 1, step: 0.01, d: 0.2 },
         { k: 'moireDrift', l: 'Moiré Drift', min: 0, max: 1, step: 0.01, d: 0.2 },
         amt('capture', 'Screen Pulse'),

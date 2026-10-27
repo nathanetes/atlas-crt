@@ -172,6 +172,7 @@
       rec.start(500);
       v.play().catch(() => { toast('The clip would not play, so recording stopped.'); job.cancelled = true; stop(); });
     } else {
+      K.seek(0); // keyframes play from the start of the timeline
       rec.start(500);
     }
     job.started = performance.now();

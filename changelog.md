@@ -1,5 +1,28 @@
 # Changelog
 
+## v2.3.0-beta
+
+Keyframes with a curve editor replace waveform automation, and moiré now bends with the real shape of the tube.
+
+Try it at https://atlas-crt.nathanetes.com
+
+### Added
+
+- **Keyframes.** Click ◆ next to any slider to keyframe it. Move the playhead, set the slider, and that value is keyed there. Dragging a slider while the clip plays edits one keyframe instead of leaving a trail of them. Each control gets a lane under its slider: click a keyframe to jump to it, drag it to retime it, and step between keyframes with < and >. Keyframes export with the video and save with looks.
+- **Curve editor.** The move out of each keyframe follows a curve you shape: drag its two handles, or pick ease in-out, linear, ease in, ease out, snap, overshoot or hold. The solid line shows the value over the move and the dashed line its speed, so you can see where it speeds up and where it settles.
+- **A timeline for photos and the test card.** It loops every 10 seconds, or longer to fit the last keyframe, and the scrub bar now moves through it. Still exports start from the beginning of the timeline.
+- **Tube Curvature** and **Camera Position** in Capture. The moiré camera now photographs its grid on curved glass. Each photosite traces a ray to the tube face (a sphere, or a cylinder for Aperture Grille, which is flat top to bottom like a Trinitron), and the grid is laid out along the glass. The fringes bend into hyperbolas and zone-plate rings toward the sides, as they do when you film a real tube. Camera Position moves the phone left or right, so the rings shift off center. The camera uses whichever is stronger, Tube Curvature or the picture's Curvature in Glass & Optics.
+
+### Removed
+
+- **Waveform automation** from v1.2.0-beta (the ~ button with shape, rate and depth). Keyframes replace it.
+
+### Known limitations
+
+- **Saved looks and sessions lose their old automation.** Waveform automation can't be turned into keyframes, so it's dropped when a look or session loads. The rest of the look is kept.
+- **Keyframes follow the clip's own time.** Keyframes set past the end of a shorter clip sit dimmed at the end of the lane until you drag them back.
+- **At full Tube Curvature** the moiré gets so dense at the far corners that it turns into fine noise there.
+
 ## v2.2.2-beta
 
 Atlas CRT now opens with its own title intro.
