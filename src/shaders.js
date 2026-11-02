@@ -408,6 +408,12 @@ void main() {
 uniform sampler2D uTex;
 void main() { o = vec4(texture(uTex, vUv).rgb, 1.0); }`;
 
+  // the tape's output over the picture that went in, by VHS Amount
+  const TAPEMIX = COMMON + `
+uniform sampler2D uDry, uWet;
+uniform float uMix;
+void main() { o = vec4(mix(texture(uDry, vUv).rgb, texture(uWet, vUv).rgb, uMix), 1.0); }`;
+
   // copy into linear light, so the glow pyramid blurs light rather than signal values
   const LINCOPY = COMMON + `
 uniform sampler2D uTex;
@@ -423,5 +429,5 @@ void main() {
   o = vec4(c, 1.0);
 }`;
 
-  window.AtlasShaders = { VERT, COMMON, MOSH, SIGNAL, COMP_ENC, COMP_DEC, PREGRADE, COPY, LINCOPY, BLUR };
+  window.AtlasShaders = { VERT, COMMON, MOSH, SIGNAL, COMP_ENC, COMP_DEC, PREGRADE, COPY, LINCOPY, BLUR, TAPEMIX };
 })();

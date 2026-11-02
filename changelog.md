@@ -1,5 +1,32 @@
 # Changelog
 
+## v3.1.0-beta
+
+Real VHS, from the real thing: ntsc-rs now runs inside Atlas. And the interface moves closer to a native Apple app.
+
+Try it at https://atlas-crt.nathanetes.com
+
+### Added
+
+- **VHS Tape and NTSC Signal modules, powered by [ntsc-rs](https://github.com/valadaptive/ntsc-rs).** This is the ntsc-rs engine by valadaptive compiled to run in the browser, not an imitation. Compared directly with the ntsc-rs 0.9.7 app, the same image and settings give the same picture, with no pixel off by more than 1/255. Every setting is here with the same ranges and defaults: tape speed, edge wave, head switching, tracking noise, chroma loss, composite noise, snow, ringing, luma smear, chroma phase and delay, field handling and demodulation filters.
+- **The tape sits before the TV,** where it belongs. Play it alone, or send it through Atlas's tube, moiré and grading. Every tape setting can take keyframes or an LFO, so edge wave can drift or tracking can fall apart on cue.
+- **New looks in Tape:** VHS Tape (the ntsc-rs defaults), VHS SP, VHS EP, Living Room VHS, Tracking Error and Broadcast NTSC. VHS Camcorder, Rental Tape EP and Haunted Tape are rebuilt on the new engine.
+- **Import ntsc-rs presets.** Import under Mine now takes `.json` presets saved by the ntsc-rs app, and adds each as a look.
+- **Tube Drive** in Screen, the set's contrast drive, which used to be fixed. 1.00 shows the signal at its true level.
+
+### Changed
+
+- **The interface is closer to Apple's.** The toolbar is one surface with the window, with controls grouped in capsules. The transport floats over the picture in frosted glass and steps back while a clip plays, as in QuickTime. Controls sit in inset grouped lists like Settings, with iOS-style switches, Apple's system colors and translucent materials, and popovers and toggles move on springs.
+- **Init is truly neutral now.** It used to brighten everything about 12% and compress the highlights, so even with every effect off the picture didn't match the source. It now passes the picture through at its true level. Factory looks keep Tube Drive at 1.30, so they look as they did.
+- While a tape plays, the raster opens up to at least its 480 lines, then returns to your setting.
+
+### Known limitations
+
+- **The tape runs on the CPU,** at about 10 ms a frame at 640×480 on a recent Mac, and updates 30 times a second. On a slower phone or computer, lower Scanlines in NTSC Signal.
+- **VHS Camcorder, Rental Tape EP and Haunted Tape look different,** since they're rebuilt on ntsc-rs. Looks you saved keep their own settings.
+- **Betamax Archive, S-VHS Master and Late Night Ad** still use Atlas's own signal path, as ntsc-rs has no Betamax or S-VHS mode.
+- **A saved look based on Init** keeps the brightness it was saved with. Only a freshly loaded Init is neutral.
+
 ## v3.0.0-beta
 
 A new interface, in the same family as covrt and cobalt, with LFOs alongside keyframes, a real automation timeline, undo, and looks you can keep in a file.

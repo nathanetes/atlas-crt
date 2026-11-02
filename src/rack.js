@@ -22,12 +22,17 @@
   // ------------------------------------------------------------ one control row
   const rows = new Map();
   K.rows = rows;
-  const decimals = (c) => (c.step >= 1 ? 0 : c.step >= 0.1 ? 1 : c.step >= 0.01 ? 2 : 3);
+  const decimals = (c) => (c.dp !== undefined ? c.dp : c.step >= 1 ? 0 : c.step >= 0.1 ? 1 : c.step >= 0.01 ? 2 : 3);
   const fmtVal = (K.fmtVal = (c, v) => {
     if (c.opts) { const o = c.opts.find((x) => x.v === v); return o ? o.l : String(v); }
     return v.toFixed(decimals(c)) + (c.u && c.u.length < 4 ? ' ' + c.u : '');
   });
-  const share = (c, v) => (v - c.min) / (c.max - c.min);
+  // where a value sits on its slider, 0..1. A control with pow gives small values most of the travel.
+  const share = (c, v) => {
+    const u = (v - c.min) / (c.max - c.min);
+    return c.pow ? Math.pow(Math.max(0, u), 1 / c.pow) : u;
+  };
+  const fromShare = (c, x) => c.min + (c.max - c.min) * Math.pow(x, c.pow);
 
   function buildControl(c, parent, group) {
     const row = el('div', 'ctl');
@@ -47,8 +52,9 @@
       const slide = el('div', 'slider');
       const input = (r.input = el('input'));
       input.type = 'range';
-      input.min = c.min; input.max = c.max; input.step = c.step;
-      input.oninput = () => setParam(c.k, +input.value);
+      if (c.pow) { input.min = 0; input.max = 1; input.step = 0.001; }
+      else { input.min = c.min; input.max = c.max; input.step = c.step; }
+      input.oninput = () => setParam(c.k, c.pow ? fromShare(c, +input.value) : +input.value);
       input.ondblclick = () => setParam(c.k, DEFAULTS[c.k]);
       // a slider drag edits one keyframe, even while the clip plays on under it
       input.addEventListener('pointerdown', () => { r.sliding = true; });
@@ -121,7 +127,7 @@
   }
   function paintValue(r, v) {
     if (r.c.opts) { r.input.value = String(v); return; }
-    r.input.value = v;
+    r.input.value = r.c.pow ? share(r.c, v) : v;
     r.input.style.setProperty('--pct', share(r.c, v) * 100 + '%');
     r.out.textContent = fmtVal(r.c, v);
   }
@@ -333,7 +339,7 @@
       }),
       btn('i-next', 'Next keyframe', () => step(1)),
     );
-    const open = el('button', 'btn btn-secondary btn-xs', 'Edit in timeline');
+    const open = el('button', 'btn btn-secondary btn-xs', 'Edit in Timeline');
     open.type = 'button';
     open.onclick = () => { K.showTimeline(); K.emit('activate', k); K.closePops(); };
     return [row, el('p', 'hint', 'Move the playhead and set the slider to key a value. Timing and curves live in the timeline.'), open];
@@ -421,7 +427,7 @@
     if (l.wave === 'random' || l.wave === 'drift') {
       const dice = el('button', 'btn btn-secondary btn-xs');
       dice.type = 'button';
-      dice.append(icon('i-dice'), 'New pattern');
+      dice.append(icon('i-dice'), 'New Pattern');
       dice.onclick = () => { l.seed = 1 + Math.floor(Math.random() * 9000) / 100; lfoRefs.cycle = null; touched(); };
       parts.push(dice);
     }
@@ -539,7 +545,9 @@
   K.modules = () => GROUPS.map((g) => ({ id: g.id, title: g.title }));
   K.layoutModules = () => {
     const ids = GROUPS.map((g) => g.id);
-    const order = [...ui.modOrder.filter((id) => mods.has(id)), ...ids.filter((id) => !ui.modOrder.includes(id))];
+    // a module added since the order was saved goes where it belongs, after the one it follows
+    const order = ui.modOrder.filter((id) => mods.has(id));
+    ids.forEach((id, i) => { if (!order.includes(id)) order.splice(i ? order.indexOf(ids[i - 1]) + 1 : 0, 0, id); });
     ui.modOrder = order;
     order.forEach((id) => {
       const m = mods.get(id);
@@ -649,10 +657,16 @@
     if (Number.isFinite(raw.length) && raw.length > 0) look.length = raw.length;
     return look;
   }
+  // a preset saved by the ntsc-rs app, as a look: the tape on its own, with the tube out of the way
+  function presetLook(preset, fileName) {
+    const init = PRESETS.find((p) => p.name === 'Init').p;
+    return { name: fileName.replace(/\.json$/i, ''), p: { ...init, ...window.AtlasPreset.fromPreset(preset), vhs: 1 } };
+  }
   async function importLooks(file) {
     let data;
     try { data = JSON.parse(await file.text()); } catch (e) { toast('That file isn\'t a looks file.'); return; }
-    const incoming = (Array.isArray(data) ? data : Array.isArray(data.looks) ? data.looks : [data]).map(cleanLook).filter(Boolean);
+    const incoming = (window.AtlasPreset.isPreset(data) ? [presetLook(data, file.name)]
+      : Array.isArray(data) ? data : Array.isArray(data.looks) ? data.looks : [data]).map(cleanLook).filter(Boolean);
     if (!incoming.length) { toast('No looks found in that file.'); return; }
     const list = mine();
     let added = 0;
@@ -766,6 +780,7 @@
     toast('Saved "' + name + '"');
   };
   $('exportLooks').onclick = () => K.saveFile(lookFile(mine()), 'atlas-looks-' + today() + '.json');
+  $('importLooks').title = 'Atlas looks, or presets saved by the ntsc-rs app';
   $('importLooks').onclick = () => $('looksFile').click();
   $('looksFile').onchange = (e) => { if (e.target.files[0]) importLooks(e.target.files[0]); e.target.value = ''; };
   K.looksIO = { exportAll: () => $('exportLooks').click(), importFile: () => $('looksFile').click() };
@@ -774,12 +789,12 @@
     const p = { ...DEFAULTS };
     GROUPS.forEach((g) => g.controls.forEach((c) => {
       if (c.opts) { if (Math.random() < 0.2) p[c.k] = c.opts[Math.floor(Math.random() * c.opts.length)].v; return; }
-      if (c.n !== undefined && Math.random() > 0.25) return;
+      if (c.tape || (c.n !== undefined && Math.random() > 0.25)) return;
       const span = c.max - c.min;
       const v = c.n !== undefined ? c.min + span * Math.pow(Math.random(), 1.8) : c.min + span * Math.random();
       p[c.k] = Math.round(v / c.step) * c.step;
     }));
-    ['capture', 'invert', 'solar', 'mosh'].forEach((k) => { if (Math.random() > 0.2) p[k] = DEFAULTS[k]; });
+    ['capture', 'invert', 'solar', 'mosh', 'vhs'].forEach((k) => { if (Math.random() > 0.2) p[k] = DEFAULTS[k]; });
     p.tint = 0;
     applyLook({ name: null, p });
   };

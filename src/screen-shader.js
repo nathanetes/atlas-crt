@@ -24,6 +24,7 @@ const mat3 P22_D65 = mat3(0.9395, 0.0178, -0.0016, 0.0502, 0.9658, -0.0044, 0.01
 const mat3 P22_D93 = mat3(0.5845, 0.0111, -0.0010, 0.0378, 0.7270, -0.0033, 0.0103, 0.0164, 1.0043);
 uniform float u_postExp, u_hue, u_sat, u_temp, u_tintGM, u_shHue, u_shAmt, u_hiHue, u_hiAmt, u_lift, u_gamma;
 uniform float u_poster, u_solar, u_gmap, u_cross, u_invert, u_chanSwap, u_grunge, u_crush;
+uniform float u_drive;
 uniform float u_film, u_filmSize, u_filmColor, u_filmResp, u_filmVar, u_dust, u_scratch, u_dustOpacity, u_weave;
 
 // one scanline of the signal, decoded to the light the beam puts out. Interlaced, the field just
@@ -376,10 +377,9 @@ void main() {
   }
 
   // back to display values: the camera, lens and grade below are tuned on these.
-  // TUBE_DRIVE is the set's contrast drive: 1.0 shows the signal's true level, 1.3 keeps
+  // Tube Drive is the set's contrast drive: 1.0 shows the signal's true level, and 1.3 keeps
   // the brightness the factory looks were tuned at before the tube moved to linear light.
-  const float TUBE_DRIVE = 1.3;
-  col = toGam(col * TUBE_DRIVE);
+  col = toGam(col * u_drive);
 
   // camera filming the tube: scan pulse against the shutter
   if (u_capture > 0.001) {
@@ -408,7 +408,8 @@ void main() {
 
   // post grade: exposure, contrast, brightness and colour, a soft shoulder, then the creative colour
   col = basicGrade(col, u_postExp, u_bright, u_contrast, u_sat, u_temp, u_tintGM, u_hue);
-  col = mix(col, 0.8 + 0.2 * tanh((col - 0.8) / 0.2), step(0.8, col));
+  // a driven tube rolls off its highlights; at true level there is nothing to roll off
+  col = mix(col, 0.8 + 0.2 * tanh((col - 0.8) / 0.2), step(0.8, col) * clamp((u_drive - 1.0) / 0.3, 0.0, 1.0));
   vec3 shC = hue2rgb(u_shHue / 360.0), hiC = hue2rgb(u_hiHue / 360.0);
   float l = lum(col);
   col += (shC - 0.5) * u_shAmt * 0.5 * (1.0 - smoothstep(0.0, 0.6, l));
