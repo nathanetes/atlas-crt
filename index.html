@@ -92,21 +92,25 @@
     </a>
     <p class="nav-source"><span id="srcName"></span><span id="badge"></span></p>
     <div class="nav-links">
-      <button class="nav-icon" id="undoBtn" type="button" aria-label="Undo" title="Undo (⌘Z)" disabled><svg class="i" viewBox="0 0 24 24"><use href="#i-undo"/></svg></button>
-      <button class="nav-icon" id="redoBtn" type="button" aria-label="Redo" title="Redo (⇧⌘Z)" disabled><svg class="i" viewBox="0 0 24 24"><use href="#i-redo"/></svg></button>
-      <button class="nav-icon" id="historyBtn" type="button" aria-label="History" title="History: go back to any point in this session" aria-expanded="false"><svg class="i" viewBox="0 0 24 24"><use href="#i-clock"/></svg></button>
-      <span class="nav-rule"></span>
-      <button class="nav-link" id="toolsBtn" type="button" aria-expanded="false">Tools</button>
-      <button class="nav-icon" id="settingsBtn" type="button" aria-label="Settings" title="Appearance and layout"><svg class="i" viewBox="0 0 24 24"><use href="#i-sliders"/></svg></button>
-      <button class="nav-icon" id="themeBtn" type="button" aria-label="Switch between light and dark appearance" title="Appearance">
-        <svg class="i theme-light" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
-        <svg class="i theme-dark" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
-      </button>
-      <span class="nav-rule"></span>
-      <button class="btn btn-secondary btn-sm" id="openBtn" type="button">Open</button>
-      <input type="file" id="file" accept="image/*,video/*" hidden>
-      <button class="btn btn-secondary btn-sm" id="stillBtn" type="button">Save still</button>
-      <button class="btn btn-primary btn-sm" id="recBtn" type="button">Export<span class="wide">&nbsp;video</span></button>
+      <div class="tool-group">
+        <button class="nav-icon" id="undoBtn" type="button" aria-label="Undo" title="Undo (⌘Z)" disabled><svg class="i" viewBox="0 0 24 24"><use href="#i-undo"/></svg></button>
+        <button class="nav-icon" id="redoBtn" type="button" aria-label="Redo" title="Redo (⇧⌘Z)" disabled><svg class="i" viewBox="0 0 24 24"><use href="#i-redo"/></svg></button>
+        <button class="nav-icon" id="historyBtn" type="button" aria-label="History" title="History: go back to any point in this session" aria-expanded="false"><svg class="i" viewBox="0 0 24 24"><use href="#i-clock"/></svg></button>
+      </div>
+      <div class="tool-group">
+        <button class="nav-link" id="toolsBtn" type="button" aria-expanded="false">Tools</button>
+        <button class="nav-icon" id="settingsBtn" type="button" aria-label="Settings" title="Appearance and layout"><svg class="i" viewBox="0 0 24 24"><use href="#i-sliders"/></svg></button>
+        <button class="nav-icon" id="themeBtn" type="button" aria-label="Switch between light and dark appearance" title="Appearance">
+          <svg class="i theme-light" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+          <svg class="i theme-dark" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+        </button>
+      </div>
+      <div class="tool-group">
+        <button class="nav-link" id="openBtn" type="button">Open</button>
+        <input type="file" id="file" accept="image/*,video/*" hidden>
+        <button class="nav-link" id="stillBtn" type="button">Save Still</button>
+      </div>
+      <button class="btn btn-primary btn-sm" id="recBtn" type="button">Export<span class="wide">Video</span></button>
     </div>
   </header>
 
@@ -126,7 +130,7 @@
           <p class="rec-link" id="recLink" hidden>Need a GIF, MOV or MP3? Save this, then convert it in <a href="https://covrt.nathanetes.com" target="_blank" rel="noopener">covrt</a> or, on your phone, <a href="https://cobalt.nathanetes.com" target="_blank" rel="noopener">cobalt</a>.</p>
         </div>
       </div>
-      <div class="transport">
+      <div class="transport" id="transport">
         <button class="icon-btn play" id="playBtn" type="button" aria-label="Pause" title="Play or pause (Space)"></button>
         <input class="scrub" type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="Position">
         <span class="timecode" id="time">0:00 / 0:00</span>
@@ -148,17 +152,17 @@
             <div class="looks-grid" id="presetGrid"></div>
             <div class="look-tools" id="mineTools" hidden>
               <button class="btn btn-secondary btn-xs" id="importLooks" type="button"><svg class="i" viewBox="0 0 24 24"><use href="#i-upload"/></svg>Import</button>
-              <button class="btn btn-secondary btn-xs" id="exportLooks" type="button"><svg class="i" viewBox="0 0 24 24"><use href="#i-download"/></svg>Export all</button>
+              <button class="btn btn-secondary btn-xs" id="exportLooks" type="button"><svg class="i" viewBox="0 0 24 24"><use href="#i-download"/></svg>Export All</button>
               <input type="file" id="looksFile" accept=".json,application/json" hidden>
               <p class="fineprint" id="mineNote"></p>
             </div>
             <form class="save-look" id="saveForm">
-              <input id="presetName" type="text" placeholder="Name this look" maxlength="40" aria-label="Look name" autocomplete="off">
+              <input id="presetName" type="text" placeholder="Name This Look" maxlength="40" aria-label="Look name" autocomplete="off">
               <button class="btn btn-primary btn-xs" id="savePreset" type="submit">Save</button>
             </form>
             <div class="sec-actions">
               <button class="btn btn-plain btn-xs" id="randomBtn" type="button">Randomize</button>
-              <button class="btn btn-plain btn-xs" id="resetBtn" type="button">Reset all</button>
+              <button class="btn btn-plain btn-xs" id="resetBtn" type="button">Reset All</button>
             </div>
           </section>
           <section class="sec" id="quickSec">
@@ -203,7 +207,7 @@
   <section class="timeline" id="timeline" aria-label="Automation timeline">
     <div class="tl-bar">
       <h2 class="tl-title">Automation</h2>
-      <button class="btn btn-secondary btn-xs" id="tlAdd" type="button" aria-expanded="false"><svg class="i" viewBox="0 0 24 24"><use href="#i-plus"/></svg>Add parameter</button>
+      <button class="btn btn-secondary btn-xs" id="tlAdd" type="button" aria-expanded="false"><svg class="i" viewBox="0 0 24 24"><use href="#i-plus"/></svg>Add Parameter</button>
       <span class="tl-spacer"></span>
       <label class="tl-field" id="tlLenField">Length <input class="number" id="tlLen" type="number" min="1" max="600" step="1"> s</label>
       <label class="tl-field">Snap
@@ -233,7 +237,7 @@
       <aside class="tl-inspect" id="tlInspect" aria-label="Selected keyframe"></aside>
     </div>
   </section>
-  <button class="tl-show" id="tlShow" type="button"><svg class="i" viewBox="0 0 24 24"><use href="#i-chevron"/></svg>Show timeline</button>
+  <button class="tl-show" id="tlShow" type="button"><svg class="i" viewBox="0 0 24 24"><use href="#i-chevron"/></svg>Show Timeline</button>
 </div>
 
 <div class="drop-overlay" id="drop" aria-hidden="true">
@@ -317,6 +321,7 @@
 
 <script src="src/shaders.js"></script>
 <script src="src/screen-shader.js"></script>
+<script src="src/vhs.js"></script>
 <script src="src/engine.js"></script>
 <script src="src/params.js"></script>
 <script src="src/automation.js"></script>

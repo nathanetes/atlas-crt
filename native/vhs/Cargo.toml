@@ -1,0 +1,22 @@
+# Atlas CRT's tape stage: the ntsc-rs core library compiled to WebAssembly.
+# Build it with native/vhs/build.sh, which writes src/vhs.wasm.
+[package]
+name = "atlas-vhs"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ntscrs = { package = "ntsc-rs", git = "https://github.com/valadaptive/ntsc-rs", rev = "8cfc51014092a6dc1da5eb0217bb9ae6516b124e", default-features = false, features = ["std"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[workspace]

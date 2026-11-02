@@ -19,6 +19,8 @@
     return;
   }
   K.engine = engine;
+  engine.tape.onfail = () => toast('The VHS tape stage could not start in this browser.');
+  engine.onraster = () => updateBadge();
 
   const state = (K.state = {
     params: { ...DEFAULTS },
@@ -436,6 +438,19 @@
     canvas.onpointermove = move;
     canvas.onpointerup = () => { canvas.onpointermove = null; };
   });
+
+  // the transport floats over the picture, and steps back while the clip plays untouched
+  const stage = vp.parentElement;
+  function wake() {
+    stage.classList.remove('resting');
+    clearTimeout(wake.t);
+    wake.t = setTimeout(() => {
+      const busy = !state.playing || K.recording || stage.querySelector('#transport:hover, #transport:focus-within');
+      if (busy) wake(); else stage.classList.add('resting');
+    }, 2600);
+  }
+  ['pointermove', 'pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, wake, { passive: true }));
+  wake();
 
   // Preview sizing. Fitted to the window, the canvas renders at screen resolution
   // so the mask never aliases; at 100% and while exporting it renders at full size.

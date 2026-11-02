@@ -1,4 +1,4 @@
-// Atlas CRT WebGL2 engine: source upload -> (pre grade) -> (datamosh) -> signal raster -> glow pyramids -> screen.
+// Atlas CRT WebGL2 engine: source upload -> (pre grade) -> (datamosh) -> (tape) -> signal raster -> glow pyramids -> screen.
 // The signal raster is gamma-encoded; the glow pyramids and the screen's beams, mask and glow work in linear light.
 (function () {
   const RASTER = {
@@ -36,7 +36,11 @@
         sensor: this._program(S.VERT, S.SENSOR),
         demosaic: this._program(S.VERT, S.DEMOSAIC),
         pregrade: this._program(S.VERT, S.PREGRADE),
+        tapemix: this._program(S.VERT, S.TAPEMIX),
       };
+      this.tape = new window.AtlasTape();
+      this.tapeLines = 0;
+      this.srcStamp = 0;
       this.srcTex = this._texture(true);
       this.quality = 'SD';
       this.source = null;
@@ -82,11 +86,12 @@
       return t;
     }
 
-    _target(w, h, mip) {
+    // bytes: 8 bits a channel, for a target that gets read back or written from the CPU
+    _target(w, h, mip, bytes) {
       const gl = this.gl;
       w = Math.max(2, Math.round(w)); h = Math.max(2, Math.round(h));
       const tex = this._texture(mip);
-      if (this.half) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+      if (this.half && !bytes) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
       else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
       if (mip) gl.generateMipmap(gl.TEXTURE_2D);
       const fbo = gl.createFramebuffer();
@@ -164,8 +169,9 @@
       if (!this.srcW || !this.outW) return;
       const r = RASTER[this.quality];
       const aspect = this.srcW / this.srcH;
-      // SD/HI line counts are set on the short side, so portrait clips keep the same pitch
-      const lines = r.lines ? Math.round(r.lines / Math.min(1, aspect)) : Math.min(this.srcH, this.expH);
+      // SD/HI line counts are set on the short side, so portrait clips keep the same pitch. A tape
+      // holds more lines than SD, so while one plays the raster opens up to show them all.
+      const lines = r.lines ? Math.round(Math.max(r.lines, this.tapeLines) / Math.min(1, aspect)) : Math.min(this.srcH, this.expH);
       const width = Math.min(this.maxTex, Math.round(lines * aspect * r.wide));
       [this.sig, this.low, this.mosh, this.A, this.B, this.C, this.D, this.comp].forEach(set => set && set.forEach(t => this._free(t)));
       // the pre-graded source: twice the raster is plenty, since the signal pass reads it at raster size
@@ -195,7 +201,42 @@
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el);
       gl.generateMipmap(gl.TEXTURE_2D);
       this.srcDirty = false;
+      this.srcStamp = el instanceof HTMLVideoElement ? el.currentTime : this.srcStamp + (this.live ? 0 : 1);
       return true;
+    }
+
+    // The tape stage. ntsc-rs filters each scanline recursively, so it runs on the CPU: the frame is
+    // read back at tape resolution, run through it, and uploaded again. A new frame runs 30 times a
+    // second, like the tape it stands for. Returns null until the library has loaded.
+    _runTape(src, params, time) {
+      const gl = this.gl, T = this.tape;
+      if (!T.ready) { T.load(); return null; }
+      const aspect = this.srcW / this.srcH, lines = Math.round(params.vhsLines);
+      const even = (v) => Math.max(2, Math.round(v / 2) * 2);
+      const w = even(lines * Math.max(1, aspect)), h = even(lines / Math.min(1, aspect));
+      if (!this.tapeIn || this.tapeIn.w !== w || this.tapeIn.h !== h) {
+        [this.tapeIn, this.tapeWet, this.tapeOut].forEach((t) => this._free(t));
+        this.tapeIn = this._target(w, h, false, true);
+        this.tapeWet = this._target(w, h, false, true);
+        this.tapeOut = this._target(w, h, true);
+        this.tapeKey = null;
+      }
+      T.sync(params);
+      const n = Math.floor(time * 30);
+      const key = [n, T.version, this.srcStamp, w, ...Object.keys(PRE_NEUTRAL).map((k) => params[k])].join();
+      if (key !== this.tapeKey) {
+        this.tapeKey = key;
+        this._pass(this.progs.copy, this.tapeIn, {}, { uTex: src });
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.tapeIn.fbo);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, T.pixels(w, h));
+        T.process(n);
+        gl.bindTexture(gl.TEXTURE_2D, this.tapeWet.tex);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, T.pixels(w, h));
+      }
+      this._pass(this.progs.tapemix, this.tapeOut, { uMix: Math.min(1, params.vhs) }, { uDry: this.tapeIn.tex, uWet: this.tapeWet.tex });
+      this._mips(this.tapeOut);
+      return this.tapeOut;
     }
 
     _pass(prog, target, uniforms, textures) {
@@ -230,6 +271,12 @@
     render(params, time, frame, extra) {
       const gl = this.gl;
       if (!this.sig || !this._upload()) return false;
+      const tapeLines = params.vhs > 0.001 ? Math.round(params.vhsLines) : 0;
+      if (tapeLines !== this.tapeLines) {
+        this.tapeLines = tapeLines;
+        this._resize();
+        if (this.onraster) this.onraster();
+      }
       gl.bindVertexArray(this.vao);
       gl.disable(gl.BLEND);
       // interlaced rasters draw one field per frame: 0 = even rows, 1 = odd rows; -1 = progressive
@@ -265,6 +312,10 @@
         signalSrc = mOut.tex; srcRes = [mOut.w, mOut.h];
       } else {
         this.moshFresh = true;
+      }
+      if (params.vhs > 0.001) {
+        const tape = this._runTape(signalSrc, params, time);
+        if (tape) { signalSrc = tape.tex; srcRes = [tape.w, tape.h]; }
       }
       U.uSrcRes = srcRes;
       U.uSrcAspect = this.srcW / this.srcH;

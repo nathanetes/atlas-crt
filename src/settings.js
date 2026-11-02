@@ -153,7 +153,7 @@
   }
 
   function render() {
-    const reset = el('button', 'btn btn-secondary btn-xs', 'Reset layout');
+    const reset = el('button', 'btn btn-secondary btn-xs', 'Reset Layout');
     reset.type = 'button';
     reset.onclick = () => {
       Object.assign(ui, DEFAULT_LAYOUT, { modOrder: [], modHidden: [], pinned: [], laneH: {} });
@@ -162,10 +162,10 @@
       render();
       toast('Layout reset.');
     };
-    const importBtn = el('button', 'btn btn-secondary btn-xs', 'Import looks');
+    const importBtn = el('button', 'btn btn-secondary btn-xs', 'Import Looks');
     importBtn.type = 'button';
     importBtn.onclick = K.looksIO.importFile;
-    const exportBtn = el('button', 'btn btn-secondary btn-xs', 'Export all looks');
+    const exportBtn = el('button', 'btn btn-secondary btn-xs', 'Export All Looks');
     exportBtn.type = 'button';
     exportBtn.onclick = K.looksIO.exportAll;
     const dataRow = el('div', 'rec-row');

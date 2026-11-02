@@ -1,6 +1,8 @@
 // Atlas CRT controls, quick macros and factory looks.
 // Control fields: k key, l label, min/max/step, d default, n value when the module
-// is switched off, u unit, opts for stepped choices, dirt = eased by Signal Clean.
+// is switched off, u unit, opts for stepped choices, dirt = eased by Signal Clean, pow = the slider
+// follows this power curve so small values get most of its travel, dp = decimals shown, tape = a
+// setting of the tape stage, which Init and Randomize leave alone.
 (function () {
   const pick = (labels) => labels.map((l, v) => ({ v, l }));
   const steps = (vals, unit) => vals.map(v => ({ v, l: v + unit }));
@@ -17,9 +19,13 @@
     { k: 'mGlow', l: 'Glow', keys: ['glow', 'postGlow', 'halation', 'spectral', 'pbloom'] },
     { k: 'mMoire', l: 'Moiré', keys: ['moire', 'rainbow', 'capture'] },
     { k: 'mColor', l: 'Color', keys: ['preSat', 'preTemp', 'preTint', 'preHue', 'chroma', 'hueDrift', 'bleed', 'rgbSplit', 'conv', 'hue', 'sat', 'temp', 'tintGM', 'shAmt', 'hiAmt', 'gmap', 'cross', 'solar', 'grunge'] },
-    { k: 'mGrime', l: 'Grime', keys: ['shake', 'tear', 'roll', 'flash', 'dropout', 'hum', 'echo', 'headSwitch', 'topLine', 'rf', 'grain', 'film', 'dust', 'scratch', 'weave', 'sync', 'ripple', 'flicker'] },
+    { k: 'mGrime', l: 'Grime', keys: ['shake', 'tear', 'roll', 'flash', 'dropout', 'hum', 'echo', 'headSwitch', 'topLine', 'rf', 'grain', 'film', 'dust', 'scratch', 'weave', 'sync', 'ripple', 'flicker', 'vhs'] },
     { k: 'mCorrupt', l: 'Corrupt', keys: ['mosh', 'blockGlitch', 'slices', 'smear', 'compress', 'crush', 'bend', 'waves'] },
   ].map((m) => ({ ...m, min: 0, max: 2, step: 0.01, d: 1 }));
+
+  // the tape stage's controls, which match ntsc-rs's own settings, ranges and defaults
+  const tape = (k, l, min, max, step, d, extra = {}) => ({ k, l, min, max, step, d, tape: 1, ...extra });
+  const onOff = pick(['Off', 'On']);
 
   const GROUPS = [
     {
@@ -32,6 +38,67 @@
         { k: 'preTemp', l: 'Temperature', min: -1, max: 1, step: 0.01, d: 0, n: 0 },
         { k: 'preTint', l: 'Tint', min: -1, max: 1, step: 0.01, d: 0, n: 0 },
         { k: 'preHue', l: 'Hue Shift', min: -180, max: 180, step: 1, d: 0, n: 0, u: '°' },
+      ],
+    },
+    {
+      id: 'vhs', title: 'VHS Tape', hint: 'The real ntsc-rs engine: the picture goes onto a tape before it reaches the TV. Raise VHS Amount to play it. Runs at 30 frames a second, and at 480 lines the raster opens up to show them.',
+      controls: [
+        amt('vhs', 'VHS Amount'),
+        { k: 'vhsSpeed', l: 'Tape Speed', d: 2, n: 0, tape: 1, opts: pick(['Off', 'SP', 'LP', 'EP']) },
+        tape('vhsEdge', 'Edge Wave', 0, 20, 0.01, 0.5, { n: 0 }),
+        tape('vhsEdgeSpeed', 'Edge Wave Speed', 0, 10, 0.01, 4),
+        tape('vhsEdgeFreq', 'Edge Wave Frequency', 0, 0.5, 0.005, 0.05),
+        tape('vhsEdgeDetail', 'Edge Wave Detail', 1, 5, 1, 2),
+        tape('vhsHead', 'Head Switching', 0, 24, 1, 8, { n: 0 }),
+        tape('vhsHeadOffset', 'Head Offset', 0, 24, 1, 3),
+        tape('vhsHeadShift', 'Head Shift', -100, 100, 0.5, 72),
+        { k: 'vhsMid', l: 'Start Mid-Line', d: 1, tape: 1, opts: onOff },
+        tape('vhsMidPos', 'Mid-Line Position', 0, 1, 0.01, 0.95),
+        tape('vhsMidJitter', 'Mid-Line Jitter', 0, 1, 0.001, 0.03, { pow: 3, dp: 3 }),
+        tape('vhsTrack', 'Tracking Noise', 0, 120, 1, 12, { n: 0 }),
+        tape('vhsTrackWave', 'Tracking Wave', -50, 50, 0.5, 15),
+        tape('vhsTrackSnow', 'Tracking Snow', 0, 1, 0.001, 0.025, { pow: 3, dp: 3 }),
+        tape('vhsTrackAniso', 'Tracking Anisotropy', 0, 1, 0.01, 0.25),
+        tape('vhsTrackNoise', 'Tracking Static', 0, 1, 0.001, 0.25, { pow: 2, dp: 3 }),
+        tape('vhsLoss', 'Chroma Loss', 0, 1, 0.00001, 0.000025, { pow: 5, dp: 6 }),
+        tape('vhsSharpen', 'Sharpen', 0, 5, 0.01, 0.25, { n: 0 }),
+        tape('vhsSharpenFreq', 'Sharpen Frequency', 0.5, 4, 0.01, 1),
+        { k: 'vhsBlend', l: 'Vertical Chroma Blend', d: 0, tape: 1, opts: onOff },
+      ],
+    },
+    {
+      id: 'ntsc', title: 'NTSC Signal', hint: 'How the tape stage encodes the picture onto a composite signal and decodes it again. With Tape Speed off, this is broadcast NTSC alone.',
+      controls: [
+        { k: 'vhsLines', l: 'Scanlines', d: 480, tape: 1, opts: steps([240, 360, 480, 576, 720], ' lines') },
+        { k: 'vhsField', l: 'Fields', d: 4, tape: 1, opts: pick(['Alternating', 'Upper Only', 'Lower Only', 'Both', 'Interleaved, Upper First', 'Interleaved, Lower First']) },
+        { k: 'vhsFilter', l: 'Filter Type', d: 1, tape: 1, opts: pick(['Constant K (Blurry)', 'Butterworth (Sharper)']) },
+        { k: 'vhsLumaIn', l: 'Input Luma Filter', d: 2, tape: 1, opts: pick(['None', 'Box', 'Notch']) },
+        { k: 'vhsChromaIn', l: 'Chroma Low-Pass In', d: 2, tape: 1, opts: pick(['None', 'Light', 'Full']) },
+        { k: 'vhsChromaOut', l: 'Chroma Low-Pass Out', d: 2, tape: 1, opts: pick(['None', 'Light', 'Full']) },
+        { k: 'vhsDemod', l: 'Chroma Demodulation', d: 1, tape: 1, opts: pick(['Box', 'Notch', '1-Line Comb', '2-Line Comb', '2D', '2D Adaptive']) },
+        tape('vhsPreemph', 'Composite Sharpening', -1, 2, 0.01, 1, { n: 0 }),
+        tape('vhsCompNoise', 'Composite Noise', 0, 1, 0.001, 0.05, { n: 0, pow: 2, dp: 3 }),
+        tape('vhsCompFreq', 'Composite Frequency', 0, 1, 0.01, 0.5),
+        tape('vhsCompDetail', 'Composite Detail', 1, 5, 1, 1),
+        tape('vhsSnow', 'Snow', 0, 100, 0.00001, 0.00025, { n: 0, pow: 6, dp: 5 }),
+        tape('vhsSnowAniso', 'Snow Anisotropy', 0, 1, 0.01, 0.5),
+        tape('vhsSmear', 'Luma Smear', 0, 1, 0.01, 0.5, { n: 0 }),
+        tape('vhsRing', 'Ringing', 0, 10, 0.01, 4, { n: 0 }),
+        tape('vhsRingFreq', 'Ringing Frequency', 0, 1, 0.01, 0.45),
+        tape('vhsRingPower', 'Ringing Power', 1, 10, 0.01, 4),
+        tape('vhsLumaNoise', 'Luma Noise', 0, 1, 0.001, 0.01, { n: 0, pow: 2, dp: 3 }),
+        tape('vhsLumaFreq', 'Luma Noise Frequency', 0, 1, 0.01, 0.5),
+        tape('vhsLumaDetail', 'Luma Noise Detail', 1, 5, 1, 1),
+        tape('vhsChromaNoise', 'Chroma Noise', 0, 1, 0.001, 0.1, { n: 0, pow: 2, dp: 3 }),
+        tape('vhsChromaFreq', 'Chroma Noise Frequency', 0, 0.5, 0.005, 0.05),
+        tape('vhsChromaDetail', 'Chroma Noise Detail', 1, 5, 1, 2),
+        tape('vhsPhaseError', 'Chroma Phase Error', 0, 1, 0.01, 0, { n: 0 }),
+        tape('vhsPhaseNoise', 'Chroma Phase Noise', 0, 1, 0.0001, 0.001, { n: 0, pow: 3, dp: 4 }),
+        tape('vhsDelayH', 'Chroma Delay', -40, 40, 0.1, 0, { n: 0 }),
+        tape('vhsDelayV', 'Chroma Vertical Delay', -20, 20, 1, 0, { n: 0 }),
+        tape('vhsBandwidth', 'Bandwidth Scale', 0.125, 8, 0.005, 1),
+        tape('vhsVScale', 'Vertical Scale', 0.125, 8.8, 0.005, 1),
+        tape('vhsSeed', 'Random Seed', 0, 9999, 1, 0),
       ],
     },
     {
@@ -161,6 +228,7 @@
         { k: 'maskType', l: 'Screen Type', d: 1, opts: pick(['Slot Mask', 'Aperture Grille', 'Delta Dot', 'Fine Slot', 'Square Grid']) },
         { k: 'maskScale', l: 'Mask Scale', min: 0, max: 1, step: 0.01, d: 0.3 },
         { k: 'phosphor', l: 'Phosphor', min: 0, max: 1.5, step: 0.01, d: 0.55, n: 0 },
+        { k: 'drive', l: 'Tube Drive', min: 0.5, max: 2, step: 0.01, d: 1.3, n: 1, u: 'true level at 1.00' },
         amt('scanlines', 'Scanlines', 0.6),
         { k: 'refresh', l: 'Refresh', d: 59.94, opts: steps([50, 59.94, 60, 75, 85, 100, 120], ' Hz') },
         amt('persistence', 'Persistence', 0.1),
@@ -225,10 +293,15 @@
 
   // Init: a blank slate to build a look from. Every control that has a neutral value (n, what it
   // takes when its module is switched off) is set to it; the rest only shape effects that are off.
-  const INIT = Object.fromEntries(ALL.filter(c => c.n !== undefined).map(c => [c.k, c.n]));
+  // The tape's settings keep their defaults, so raising VHS Amount from Init plays a real tape.
+  const INIT = Object.fromEntries(ALL.filter(c => c.n !== undefined && !c.tape).map(c => [c.k, c.n]));
 
   // a slow random LFO that glides from value to value, for a factory look
   const wander = (rate, depth, seed) => ({ mode: 'lfo', lfo: { wave: 'random', rate, depth, smooth: 1, seed } });
+
+  // the tape on its own, with the tube out of the way, and the same tape played on a TV
+  const TAPE = { ...INIT, vhs: 1 };
+  const TAPE_ON_TV = { ...TAPE, gamut: 1, maskType: 0, maskScale: 0.3, phosphor: 0.5, scanlines: 0.45, curve: 0.3, glow: 0.3, halation: 0.15, vignette: 0.3, overscan: 0.08 };
 
   // Factory looks. Each is a full look laid over DEFAULTS, in a category from CATS.
   const PRESETS = [
@@ -242,12 +315,18 @@
     { cat: 'TV', name: 'Big Pixel Max', p: { maskType: 1, maskScale: 1, phosphor: 1.5, scanlines: 0.9, softness: 0.1, pbloom: 0.7, glow: 0.6, halation: 0.3, curve: 0.35, vignette: 0.5, chroma: 1.3, gain: 1.25 } },
     { cat: 'TV', name: 'Pastel Dream', p: { chroma: 0.98, glow: 0.15, postGlow: 1, spectral: 0.6, halation: 0.45, softness: 0.7, bright: 0.13, contrast: 1.05, gain: 1.06, gamma: 0.97, scanlines: 0.3, hueDrift: 0.3, curve: 0.35 } },
 
-    // Tape: videotape through a deck and a composite cable
-    { cat: 'Tape', name: 'VHS Camcorder', p: { composite: 2, lumaBW: 4, bleed: 0.55, chroma: 0.9, grain: 0.35, headSwitch: 0.5, shake: 0.12, dropout: 0.1, sharpen: 0.4, hueDrift: 0.05, hum: 0.08, scanlines: 0.35, phosphor: 0.25, curve: 0.1, glow: 0.2, halation: 0.15, temp: 0.08 } },
-    { cat: 'Tape', name: 'Rental Tape EP', p: { composite: 2, lumaBW: 4, bleed: 0.75, chroma: 0.7, grain: 0.6, dropout: 0.3, dropStyle: 0, tear: 0.12, headSwitch: 0.7, hum: 0.2, echo: 0.25, topLine: 0.3, sharpen: 0.5, shake: 0.2, scanlines: 0.35, phosphor: 0.25, curve: 0.15, lift: 0.03, contrast: 1.05 } },
+    // Tape: videotape through a deck and a composite cable. The first group runs on ntsc-rs itself.
+    { cat: 'Tape', name: 'VHS Tape', p: TAPE },
+    { cat: 'Tape', name: 'VHS SP', p: { ...TAPE, vhsSpeed: 1, vhsEdge: 0.25, vhsHead: 6, vhsTrack: 8, vhsTrackNoise: 0.15, vhsChromaNoise: 0.06, vhsLumaNoise: 0.006 } },
+    { cat: 'Tape', name: 'VHS EP', p: { ...TAPE, vhsSpeed: 3, vhsEdge: 1, vhsTrack: 18, vhsTrackNoise: 0.4, vhsChromaNoise: 0.18, vhsLumaNoise: 0.02, vhsLoss: 0.0008, vhsPhaseNoise: 0.004 } },
+    { cat: 'Tape', name: 'Living Room VHS', p: { ...TAPE_ON_TV, vhsSpeed: 2 } },
+    { cat: 'Tape', name: 'VHS Camcorder', p: { ...TAPE, vhsSpeed: 1, vhsEdge: 0.4, vhsSmear: 0.4, vhsHead: 8, vhsHeadShift: 60, vhsTrack: 10, vhsTrackNoise: 0.2, vhsChromaNoise: 0.12, temp: 0.08, shake: 0.08 } },
+    { cat: 'Tape', name: 'Rental Tape EP', p: { ...TAPE_ON_TV, vhsSpeed: 3, vhsEdge: 1.6, vhsHead: 10, vhsHeadShift: 90, vhsTrack: 28, vhsTrackWave: 22, vhsTrackNoise: 0.5, vhsTrackSnow: 0.06, vhsSnow: 0.002, vhsChromaNoise: 0.25, vhsLumaNoise: 0.025, vhsLoss: 0.002, vhsPhaseNoise: 0.01 } },
+    { cat: 'Tape', name: 'Tracking Error', p: { ...TAPE, vhsSpeed: 2, vhsEdge: 2.5, vhsEdgeSpeed: 6, vhsTrack: 90, vhsTrackWave: 40, vhsTrackNoise: 0.7, vhsTrackSnow: 0.25, vhsTrackAniso: 0.6, vhsSnow: 0.004, vhsHead: 12, vhsLoss: 0.004 } },
+    { cat: 'Tape', name: 'Haunted Tape', p: { ...TAPE, vhsSpeed: 3, vhsEdge: 3, vhsEdgeFreq: 0.09, vhsTrack: 60, vhsTrackWave: 30, vhsTrackNoise: 0.6, vhsTrackSnow: 0.15, vhsSnow: 0.01, vhsLoss: 0.01, vhsChromaNoise: 0.35, vhsPhaseNoise: 0.02, chroma: 0.5, contrast: 1.2, bright: -0.05, flicker: 0.2 } },
+    { cat: 'Tape', name: 'Broadcast NTSC', p: { ...TAPE, vhsSpeed: 0, vhsEdge: 0, vhsHead: 0, vhsTrack: 0, vhsDemod: 3, vhsCompNoise: 0.02, vhsChromaNoise: 0.04, vhsLumaNoise: 0.004, vhsPhaseNoise: 0.0005 } },
     { cat: 'Tape', name: 'Betamax Archive', p: { composite: 2, lumaBW: 3, bleed: 0.45, chroma: 0.85, grain: 0.3, headSwitch: 0.3, sharpen: 0.2, hueDrift: 0.03, temp: 0.22, lift: 0.04, sat: 0.82, contrast: 0.94, shHue: 30, shAmt: 0.15, scanlines: 0.4, phosphor: 0.35, curve: 0.2, glow: 0.25 } },
     { cat: 'Tape', name: 'S-VHS Master', p: { composite: 1, lumaBW: 1, bleed: 0.15, chroma: 1.05, grain: 0.1, headSwitch: 0.2, sharpen: 0.35, contrast: 1.05, scanlines: 0.5, phosphor: 0.45, curve: 0.15, glow: 0.2 } },
-    { cat: 'Tape', name: 'Haunted Tape', p: { composite: 2, lumaBW: 4, dropout: 0.35, dropStyle: 0, grain: 0.7, rf: 0.35, chroma: 0.4, echo: 0.6, hum: 0.4, shake: 0.25, headSwitch: 0.8, topLine: 0.5, flicker: 0.2, contrast: 1.2, bright: -0.05 } },
     { cat: 'Tape', name: 'Late Night Ad', p: { composite: 2, lumaBW: 2, chroma: 1.6, hueDrift: 0.15, bleed: 0.7, rgbSplit: 0.2, halation: 0.5, postGlow: 0.4, glow: 0.4, sharpen: 0.5, echo: 0.3, scanlines: 0.4, curve: 0.3, tear: 0.05 } },
 
     // Camera: the tube seen through a lens and a sensor
