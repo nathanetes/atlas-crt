@@ -24,7 +24,7 @@ const mat3 P22_D65 = mat3(0.9395, 0.0178, -0.0016, 0.0502, 0.9658, -0.0044, 0.01
 const mat3 P22_D93 = mat3(0.5845, 0.0111, -0.0010, 0.0378, 0.7270, -0.0033, 0.0103, 0.0164, 1.0043);
 uniform float u_postExp, u_hue, u_sat, u_temp, u_tintGM, u_shHue, u_shAmt, u_hiHue, u_hiAmt, u_lift, u_gamma;
 uniform float u_poster, u_solar, u_gmap, u_cross, u_invert, u_chanSwap, u_grunge, u_crush;
-uniform float u_film, u_filmSize, u_filmColor, u_filmResp, u_filmVar, u_dust, u_dustOpacity, u_weave;
+uniform float u_film, u_filmSize, u_filmColor, u_filmResp, u_filmVar, u_dust, u_scratch, u_dustOpacity, u_weave;
 
 // one scanline of the signal, decoded to the light the beam puts out. Interlaced, the field just
 // scanned glows brighter than the one fading from the frame before (gains average to 1), so detail
@@ -440,7 +440,7 @@ void main() {
     col = phc * lt + max(lt - 0.75, 0.0) * 0.8 * (vec3(1.0) - phc);
   }
 
-  // film stock: grain that clumps and breathes, dust and scratches
+  // film stock: grain that clumps and breathes, dust and straight scratches
   if (u_film > 0.001) {
     float sz = mix(1.0, 4.0, u_filmSize) * uScale;
     vec2 gp = gl_FragCoord.xy / max(sz, 0.35);
@@ -458,18 +458,26 @@ void main() {
     vec2 dq = uv * vec2(uAspect, 1.0) * 36.0;
     vec2 cell = floor(dq);
     if (hash12(cell + uFrame * 17.1) < u_dust * 0.025) {
-      float d = length(fract(dq) - vec2(hash12(cell + 1.3), hash12(cell + 2.7)));
+      // an irregular fleck for one frame: dark dirt on the print, or light through a hole in the emulsion
+      vec2 p = fract(dq) - vec2(hash12(cell + 1.3), hash12(cell + 2.7));
+      float lobes = 2.0 + floor(hash12(cell + 7.0) * 4.0);
+      float rough = 1.0 + 0.35 * sin(atan(p.y, p.x) * lobes + hash12(cell + 8.0) * 6.283);
+      float d = length(p * vec2(1.0, 0.6 + 0.8 * hash12(cell + 3.1))) * rough;
       float r = 0.05 + 0.2 * hash12(cell + 5.0);
       col = mix(col, vec3(hash12(cell + 9.0) > 0.5 ? 0.02 : 0.95), (1.0 - smoothstep(r * 0.5, r, d)) * 0.85 * u_dustOpacity);
     }
+  }
+  if (u_scratch > 0.001) {
+    // scratches run straight along the film, hold for a few frames and fade out along their length
     for (int i = 0; i < 3; i++) {
       float fi = float(i);
-      float seed = floor(uFrame / (6.0 + fi * 3.0));
-      float on = step(1.0 - u_dust * 0.6, hash11(seed * 2.1 + fi));
-      float sx = hash11(seed * 1.3 + fi * 7.0) + 0.002 * sin(uv.y * 20.0 + seed);
-      float w = 0.0006 + 0.001 * hash11(seed + fi * 3.0);
+      float seed = floor(uFrame / (8.0 + fi * 5.0));
+      float on = step(1.0 - u_scratch * 0.6, hash11(seed * 2.1 + fi));
+      float sx = hash11(seed * 1.3 + fi * 7.0);
+      float w = 0.0004 + 0.0006 * hash11(seed + fi * 3.0);
       float line = (1.0 - smoothstep(w * 0.5, w, abs(uv.x - sx))) * on;
-      col = mix(col, vec3(0.9), line * 0.6 * u_dustOpacity * (0.4 + 0.6 * vnoise1(uv.y * 30.0 + seed)));
+      float fade = 0.35 + 0.65 * vnoise1(uv.y * 4.0 + seed * 3.7);
+      col = mix(col, vec3(0.85), line * 0.4 * fade * u_dustOpacity);
     }
   }
   if (u_crush > 0.001) { float lv = exp2(mix(7.0, 1.0, u_crush)); col = floor(col * lv + bayer4(gl_FragCoord.xy)) / lv; }

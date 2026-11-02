@@ -1,7 +1,9 @@
-// Atlas CRT app core: engine, effective parameters (automation and macros), media loading,
-// render loop, transport and preview sizing. The control rack is in rack.js.
+// Atlas CRT app core: engine, the timeline, effective parameters (automation and macros), media
+// loading, render loop, transport and preview sizing. The controls are in rack.js, the automation
+// lanes in timeline.js and the interface settings in settings.js.
 (function () {
   const { MACROS, GROUPS, DEFAULTS, BY_KEY } = window.AtlasParams;
+  const Auto = window.AtlasAuto;
   const $ = (id) => document.getElementById(id);
   const canvas = $('out');
   const K = (window.Atlas = {});
@@ -10,9 +12,9 @@
   try {
     engine = new window.AtlasEngine(canvas);
   } catch (err) {
-    $('app').innerHTML = '<div class="fatal"><h2>ATLAS CRT NEEDS WEBGL2</h2><p>' +
+    $('app').innerHTML = '<div class="fatal"><h2>Atlas CRT needs WebGL2</h2><p>' +
       'This browser could not start the GPU renderer. Open the page in a current Chrome, Edge, Safari or Firefox.</p>' +
-      '<p style="color:var(--muted);font-family:var(--font-mono);font-size:12px"></p></div>';
+      '<p class="fineprint"></p></div>';
     $('app').querySelector('p:last-child').textContent = String(err.message || err).slice(0, 400);
     return;
   }
@@ -27,23 +29,36 @@
     split: 0.5,
     compare: false,
     playing: true,
-    auto: {}, // key -> { keys: [{ t (seconds on the timeline), v, ease: [x1, y1, x2, y2] or 'hold' }] }
+    auto: {}, // key -> { mode: 'keys' or 'lfo', off, keys, lfo }, see automation.js
+    length: 10, // seconds of timeline for photos and the test card
   });
   let clock = 0, frame = 0, last = performance.now();
 
   // ------------------------------------------------------------ helpers
-  function toast(msg) {
+  // action: { label, run } adds a button, such as Undo, and gives it longer on screen
+  function toast(msg, action) {
     const t = $('toast');
     t.textContent = msg;
     t.hidden = false;
     clearTimeout(toast.timer);
-    toast.timer = setTimeout(() => { t.hidden = true; }, 3200);
+    if (action) {
+      const b = K.el('button', 'toast-act', action.label);
+      b.type = 'button';
+      b.onclick = () => { t.hidden = true; action.run(); };
+      t.append(b);
+    }
+    toast.timer = setTimeout(() => { t.hidden = true; }, action ? 7000 : 3200);
   }
   K.toast = toast;
 
   const fmtTime = (s) => {
     s = Math.max(0, s || 0);
     return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+  };
+  // with hundredths, for the running time
+  K.fmtClock = (s) => {
+    s = Math.max(0, s || 0);
+    return fmtTime(s) + '.' + String(Math.floor((s % 1) * 100)).padStart(2, '0');
   };
 
   K.store = store;
@@ -54,45 +69,69 @@
     } catch (e) { return null; }
   }
 
-  // ------------------------------------------------------------ keyframes
-  // An automated control follows its keyframes along the timeline: the video's own time, or for
-  // photos and the test card a timeline that loops (10 s, or longer to fit the last keyframe).
-  // Between two keyframes the value moves along the first one's curve, a cubic Bézier from (0,0) to
-  // (1,1) as in CSS easing (x is time, y is progress, so y may overshoot); 'hold' keeps the value
-  // until the next keyframe. Exports run on the same timeline, so they repeat the preview.
-  let tl = 0; // the timeline for photos and the test card, in seconds
-  K.timelineLength = () => {
-    if (src.kind === 'video') return src.el.duration || 1;
-    let end = 0;
-    for (const k in state.auto) for (const key of state.auto[k].keys || []) end = Math.max(end, key.t);
-    return Math.max(10, Math.ceil(end + 1));
+  // small interface helpers, shared by the panels
+  K.el = (tag, cls, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
   };
+  K.icon = (name, cls) => {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('class', 'i' + (cls ? ' ' + cls : ''));
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('aria-hidden', 'true');
+    const u = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    u.setAttribute('href', '#' + name);
+    s.append(u);
+    return s;
+  };
+  // a segmented control: items are [value, label]; returns set(value) to move it from outside
+  K.segmented = (host, items, value, onChange, cls) => {
+    const seg = K.el('div', 'segmented' + (cls ? ' ' + cls : ''));
+    seg.setAttribute('role', 'tablist');
+    seg.style.setProperty('--n', items.length);
+    const thumb = K.el('span', 'segment-thumb');
+    const buttons = items.map(([v, label]) => {
+      const b = K.el('button', 'segment', label);
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.onclick = () => { set(v); onChange(v); };
+      seg.append(b);
+      return b;
+    });
+    seg.append(thumb);
+    function set(v) {
+      const i = items.findIndex(([x]) => x === v);
+      seg.style.setProperty('--i', Math.max(0, i));
+      buttons.forEach((b, j) => b.setAttribute('aria-selected', String(j === i)));
+    }
+    set(value);
+    host.replaceChildren(seg);
+    return set;
+  };
+
+  const listeners = {};
+  K.on = (ev, fn) => { (listeners[ev] = listeners[ev] || []).push(fn); };
+  K.emit = (ev, arg) => (listeners[ev] || []).forEach((fn) => fn(arg));
+
+  // how this person has arranged the interface
+  K.ui = Object.assign({
+    theme: 'dark', accent: '', textSize: 1, rackSide: 'right', rackW: 372, tlPos: 'bottom', tlH: 290,
+    modOrder: [], modHidden: [], pinned: [], snap: 'frame', laneH: {}, laneSize: 'm',
+  }, store('atlas.ui') || {});
+  K.saveUi = () => store('atlas.ui', K.ui);
+
+  // ------------------------------------------------------------ the timeline
+  // Keyframes and LFOs run on one timeline: the video's own time, or for photos and the test card a
+  // loop as long as state.length. Exports play the same timeline, so they repeat the preview.
+  let tl = 0; // the timeline for photos and the test card, in seconds
+  K.timelineLength = () => (src.kind === 'video' ? src.el.duration || 1 : state.length);
   K.timeNow = () => (src.kind === 'video' ? src.el.currentTime : tl);
   K.seek = (t) => {
     t = Math.max(0, Math.min(t, K.timelineLength()));
     if (src.kind === 'video') src.el.currentTime = t;
     else tl = t;
-  };
-
-  // progress at time fraction u (0..1) along a keyframe's curve
-  K.ease = function (e, u) {
-    if (e === 'hold') return 0;
-    const [x1, y1, x2, y2] = e;
-    const bez = (a1, a2, s) => 3 * a1 * s * (1 - s) * (1 - s) + 3 * a2 * s * s * (1 - s) + s * s * s;
-    let lo = 0, hi = 1, s = u;
-    for (let i = 0; i < 20; i++) { // x rises steadily with s while x1 and x2 stay in 0..1, so bisect for it
-      s = (lo + hi) / 2;
-      if (bez(x1, x2, s) < u) lo = s; else hi = s;
-    }
-    return bez(y1, y2, s);
-  };
-  K.valueAt = function (keys, t) {
-    if (t <= keys[0].t) return keys[0].v;
-    for (let i = 0; i < keys.length - 1; i++) {
-      const a = keys[i], b = keys[i + 1];
-      if (t < b.t) return a.v + (b.v - a.v) * K.ease(a.ease, (t - a.t) / Math.max(b.t - a.t, 1e-6));
-    }
-    return keys[keys.length - 1].v;
   };
   K.live = {};
 
@@ -101,10 +140,9 @@
     const clamp = (c, v) => Math.min(c.max, Math.max(c.min, v));
     const t = K.timeNow();
     for (const k in state.auto) {
-      const keys = state.auto[k].keys, c = BY_KEY[k];
-      if (!c || c.opts || !keys || !keys.length) continue;
-      p[k] = clamp(c, K.valueAt(keys, t));
-      K.live[k] = p[k];
+      const a = state.auto[k], c = BY_KEY[k];
+      if (!c || c.opts || a.off) { delete K.live[k]; continue; }
+      p[k] = K.live[k] = Auto.valueOf(a, p[k], c, t);
     }
     for (const m of MACROS) {
       const f = p[m.k];
@@ -180,6 +218,7 @@
     state.playing = true;
     syncTransport();
     updateBadge();
+    K.emit('source');
   }
 
   function loadSample() {
@@ -255,13 +294,14 @@
   $('openBtn').onclick = () => $('file').click();
   $('file').onchange = (e) => { loadFile(e.target.files[0]); e.target.value = ''; };
 
-  const vp = $('viewport');
+  // drop a file anywhere on the page
+  const vp = $('viewport'), drop = $('drop');
   let dragDepth = 0;
-  vp.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; $('drop').hidden = false; });
-  vp.addEventListener('dragover', (e) => e.preventDefault());
-  vp.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('drop').hidden = true; } });
-  vp.addEventListener('drop', (e) => {
-    e.preventDefault(); dragDepth = 0; $('drop').hidden = true;
+  document.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; drop.classList.add('show'); });
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; drop.classList.remove('show'); } });
+  document.addEventListener('drop', (e) => {
+    e.preventDefault(); dragDepth = 0; drop.classList.remove('show');
     loadFile(e.dataTransfer.files[0]);
   });
   document.addEventListener('pointerdown', () => { if (actx && actx.state === 'suspended') actx.resume().catch(() => {}); });
@@ -288,7 +328,7 @@
   function updateBadge() {
     const r = engine.raster;
     if (!r) return;
-    $('srcName').textContent = 'preview · ' + (src.kind === 'sample' ? 'test card' : src.name);
+    $('srcName').textContent = src.kind === 'sample' ? 'Test card' : src.name;
     $('badge').textContent = `${state.quality} ${r.w}×${r.h} → ${engine.expW}×${engine.expH}`;
   }
 
@@ -318,7 +358,8 @@
 
   // ------------------------------------------------------------ transport
   function syncTransport() {
-    $('playBtn').textContent = state.playing ? 'pause' : 'play';
+    $('playBtn').replaceChildren(K.icon(state.playing ? 'i-pause' : 'i-play'));
+    $('playBtn').setAttribute('aria-label', state.playing ? 'Pause' : 'Play');
     $('scrub').disabled = !src.el;
     $('muteBtn').disabled = src.kind !== 'video';
   }
@@ -334,6 +375,7 @@
     syncTransport();
   }
   $('playBtn').onclick = togglePlay;
+  K.togglePlay = togglePlay;
 
   let scrubbing = false;
   $('scrub').addEventListener('input', (e) => {
@@ -351,15 +393,16 @@
   function updateTime() {
     const len = K.timelineLength(), t = K.timeNow();
     if (!scrubbing) $('scrub').value = Math.round((t / len) * 1000);
-    $('time').textContent = fmtTime(t) + ' / ' + fmtTime(len);
+    $('time').textContent = K.fmtClock(t) + ' / ' + fmtTime(len);
     paintScrub();
   }
 
+  $('muteBtn').replaceChildren(K.icon('i-sound'));
   $('muteBtn').onclick = () => {
     const b = $('muteBtn');
     const muted = b.getAttribute('aria-pressed') !== 'true';
     b.setAttribute('aria-pressed', String(muted));
-    b.textContent = muted ? 'muted' : 'sound';
+    b.replaceChildren(K.icon(muted ? 'i-muted' : 'i-sound'));
     if (src.audio) src.audio.gain.gain.value = muted ? 0 : 1;
     else if (src.kind === 'video') src.el.muted = muted;
   };
@@ -406,8 +449,8 @@
     } else {
       // stacked phone layout: the preview sizes itself, so fit to the screen instead
       const stacked = matchMedia('(max-width: 900px)').matches;
-      const aw = Math.max(60, vp.clientWidth - 32);
-      const ah = Math.max(60, stacked ? window.innerHeight * 0.62 : vp.clientHeight - 32);
+      const aw = Math.max(60, vp.clientWidth - (stacked ? 0 : 24));
+      const ah = Math.max(60, stacked ? window.innerHeight * 0.4 : vp.clientHeight - 24);
       const s = Math.min(aw / engine.expW, ah / engine.expH);
       cw = engine.expW * s; ch = engine.expH * s;
     }
@@ -433,8 +476,8 @@
   };
 
   document.addEventListener('keydown', (e) => {
-    if (e.target.closest('input[type=text], select, textarea') || e.metaKey || e.ctrlKey) return;
-    if (e.code === 'Space' && !e.target.closest('button, input')) { e.preventDefault(); togglePlay(); }
+    if (e.target.closest('input:not([type=range]), select, textarea') || e.metaKey || e.ctrlKey) return;
+    if (e.code === 'Space' && !e.target.closest('button')) { e.preventDefault(); togglePlay(); }
     else if (e.key === 'c' || e.key === 'C') setCompare(!state.compare);
     else if (e.key === 'z' || e.key === 'Z') $('zoomBtn').click();
   });
