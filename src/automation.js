@@ -102,6 +102,30 @@
     return y;
   }
 
+  // ------------------------------------------------------------ motion micro-controls
+  // Every numeric control can be made to misbehave on its own, on top of any keyframes or LFO:
+  // stutter jumps it between random values, jitter shakes it each frame, spikes throw it hard for
+  // a moment, and drift lets it wander.
+  const MICRO = { stutter: 0, stutterRate: 8, jitter: 0, spike: 0, spikeRate: 2, drift: 0, driftRate: 0.3 };
+  const seedOf = (k) => { let h = 7; for (let i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) % 9973; return h / 37; };
+  function microAt(m, v, c, t) {
+    const span = c.max - c.min, s = seedOf(c.k);
+    if (m.stutter > 0) v += span * m.stutter * 0.5 * (hash(Math.floor(t * m.stutterRate), s) * 2 - 1);
+    if (m.jitter > 0) v += span * m.jitter * 0.25 * (hash(Math.floor(t * 30), s + 1) * 2 - 1);
+    if (m.spike > 0) {
+      const n = Math.floor(t * m.spikeRate), f = t * m.spikeRate - n;
+      if (hash(n, s + 2) < 0.4 && f < 0.3) v += span * m.spike * (hash(n, s + 3) > 0.5 ? 1 : -1);
+    }
+    if (m.drift > 0) v += span * m.drift * 0.5 * (noise(t * m.driftRate, s + 4) * 2 - 1);
+    return clamp(v, c.min, c.max);
+  }
+  const cleanMicro = (m) => {
+    const o = { ...MICRO };
+    for (const k in MICRO) if (Number.isFinite(m && m[k])) o[k] = m[k];
+    return o;
+  };
+  const microOn = (m) => !!m && (m.stutter > 0 || m.jitter > 0 || m.spike > 0 || m.drift > 0);
+
   // ------------------------------------------------------------ one automated control
   // the control's value at t, swinging around base for an LFO
   function valueOf(a, base, c, t) {
@@ -139,5 +163,5 @@
     return { mode: a.mode === 'lfo' && lfo ? 'lfo' : 'keys', off: !!a.off, keys, lfo };
   }
 
-  window.AtlasAuto = { WAVES, LFO, TABLE, newTable, clamp, bezier, bezierSlope, ease, valueAt, lfoAt, valueOf, normalize, cleanLfo };
+  window.AtlasAuto = { MICRO, microAt, cleanMicro, microOn, WAVES, LFO, TABLE, newTable, clamp, bezier, bezierSlope, ease, valueAt, lfoAt, valueOf, normalize, cleanLfo };
 })();

@@ -91,6 +91,8 @@ uniform float u_bend, u_bendDir, u_bendMotion, u_bendFreq, u_bendQ, u_bendBoost,
 uniform float u_shake, u_tear, u_roll, u_flash, u_dropout, u_dropStyle, u_hum, u_echo, u_headSwitch, u_topLine;
 uniform float u_rf, u_speckSize, u_speckOpacity, u_grain;
 uniform float u_waves, u_waveCount, u_waveReact, u_waveSmooth, u_waveOrient, u_waveColor, u_waveDir, u_waveBlend;
+uniform float u_hsHeight, u_hsShift, u_hsNoise, u_tlHeight, u_tlSpeed, u_tearHeight, u_tearSpeed;
+uniform float u_warp, u_warpType, u_warpScale, u_warpSpeed, u_warpTurb, u_warpStutter;
 uniform float u_blockGlitch, u_slices, u_smear, u_smearDir, u_smearThresh, u_compress;
 uniform float u_persistence;
 
@@ -115,13 +117,40 @@ float lumaLP(vec2 uv, float sigma) {
   return acc / ws;
 }
 
+// Warp: pushes the whole picture around before the signal reads it. Scale is the size of the
+// shapes, Turbulence how tangled they get, and Stutter steps time so the motion jerks.
+vec2 warpUv(vec2 uv, float t) {
+  if (u_warpStutter > 0.001) { float r = mix(30.0, 3.0, u_warpStutter); t = floor(t * r) / r; }
+  t *= u_warpSpeed;
+  int ty = int(u_warpType + 0.5);
+  float s = mix(1.0, 14.0, u_warpScale), a = u_warp * 0.12, turb = u_warpTurb;
+  vec2 q = uv * vec2(uSrcAspect, 1.0) * s, d = uv - 0.5;
+  float r = length(d * vec2(uSrcAspect, 1.0));
+  if (ty == 0) {          // flow: noise pushed around by more noise
+    vec2 w = vec2(vnoise(q + t), vnoise(q.yx - t + 5.2));
+    w = vec2(vnoise(q + w * (1.0 + 4.0 * turb) + t * 0.7), vnoise(q.yx + w * (1.0 + 4.0 * turb) + 3.1)) - 0.5;
+    return uv + w * a * 2.0;
+  }
+  if (ty == 1) return uv + a * 0.6 * vec2(sin(q.y * 2.0 + t * 3.0 + 3.0 * turb * sin(q.x * 1.3 + t)), sin(q.x * 2.0 - t * 2.0 + 3.0 * turb * sin(q.y * 1.7 - t)));
+  if (ty == 2) return uv + vec2(a * sin(q.y * 3.0 + t * 4.0) * (1.0 + turb * 2.0 * (vnoise(q * 3.0 + t) - 0.5)), 0.0);
+  if (ty == 3) return uv + vec2(0.0, a * sin(q.x * 3.0 + t * 4.0) * (1.0 + turb * 2.0 * (vnoise(q * 3.0 - t) - 0.5)));
+  if (ty == 4) return uv + d / max(r, 0.001) * a * 0.5 * sin(r * s * 6.0 - t * 5.0) * (1.0 + turb * sin(atan(d.y, d.x) * 5.0 + t));
+  if (ty == 5) return 0.5 + rot(u_warp * 7.0 * (1.0 + turb * sin(t)) * pow(max(1.0 - r, 0.0), 2.0)) * d;
+  if (ty == 6) {          // mirror fold: the picture folds over itself
+    float n = 1.0 + floor(u_warp * 6.0);
+    vec2 f = abs(fract(uv * n * 0.5 + vec2(t * turb * 0.1, 0.0)) * 2.0 - 1.0);
+    return mix(uv, f, smoothstep(0.0, 0.2, u_warp));
+  }
+  return 0.5 + d * (1.0 + u_warp * 1.6 * (r - 0.35) * (1.0 + turb * sin(t * 2.0)));   // pinch and bulge
+}
+
 void main() {
   // interlaced: this frame scans one field; the other field's rows keep what the last field drew,
   // so anything that moved between fields is caught at two moments (combing). Decided here but
   // applied at the end: returning early would break the mip derivatives of neighbouring pixels.
   bool holdField = uField >= 0.0 && mod(floor(gl_FragCoord.y), 2.0) != uField;
-  vec2 uv = vUv;
   float t = uTime, fr = uFrame;
+  vec2 uv = u_warp > 0.001 ? warpUv(vUv, t) : vUv;
   float lines = uRes.y;
   float yT = 1.0 - uv.y; // 0 = top of frame
 
@@ -144,18 +173,27 @@ void main() {
     dx += u_shake * 0.03 * step(0.93, hash11(fr * 0.37 + 1.0)) * (hash11(fr + 5.0) - 0.5);
   }
   if (u_tear > 0.001) {
-    float tpos = fract(hash11(floor(t * 1.3) + 2.0) + t * 0.11);
-    float d = (yT - tpos) / (0.04 + 0.2 * u_tear);
-    if (d > 0.0 && d < 1.0) dx += u_tear * 0.2 * d * d * (0.6 + 0.4 * sin(t * 9.0 + line * 0.05));
-    dx += u_tear * 0.04 * step(0.975, hash12(vec2(line * 0.3, floor(t * 20.0))));
+    // a sync error rolling through: lines hook away sharply, jagged, then snap back
+    float tt = t * u_tearSpeed;
+    float tpos = fract(hash11(floor(tt * 1.3) + 2.0) + tt * 0.11);
+    float d = (yT - tpos) / (0.02 + u_tearHeight * (0.1 + u_tear));
+    if (d > 0.0 && d < 1.0) {
+      float jag = vnoise(vec2(line * 0.35, tt * 11.0)) - 0.5;
+      dx += u_tear * (0.24 * d * d * (0.6 + 0.4 * sin(tt * 9.0 + line * 0.05)) + 0.09 * jag * (1.0 - d));
+    }
+    dx += u_tear * 0.04 * step(0.975, hash12(vec2(line * 0.3, floor(tt * 20.0))));
   }
   if (u_slices > 0.001) {
     float bucket = floor(t * 6.0);
     float band = floor(yT * (6.0 + floor(hash11(bucket * 0.37) * 30.0)));
     if (hash12(vec2(band, bucket)) < u_slices * 0.6) dx += (hash12(vec2(band + 3.1, bucket)) - 0.5) * 0.35 * u_slices;
   }
-  float hs = smoothstep(0.95, 0.99, yT);
-  if (u_headSwitch > 0.001) dx += u_headSwitch * hs * (0.04 + 0.05 * (hash12(vec2(line, fr)) - 0.5));
+  // head switching: the bottom lines of each field bend away as the heads hand over
+  float hsTop = 1.0 - max(u_hsHeight, 0.005), hs = smoothstep(hsTop, hsTop + 0.012, yT);
+  if (u_headSwitch > 0.001 && hs > 0.0) {
+    float h = (yT - hsTop) / max(u_hsHeight, 0.005);
+    dx += u_headSwitch * hs * u_hsShift * (0.34 * pow(h, 1.5) + 0.05 * (hash12(vec2(line, fr)) - 0.5) + 0.03 * (vnoise(vec2(line * 0.2, fr * 0.7)) - 0.5));
+  }
 
   // dropouts: one segment per affected line
   int style = int(u_dropStyle + 0.5);
@@ -282,14 +320,17 @@ void main() {
     rgb += u_echo * 0.5 * (g - 0.5 * rgb);
   }
   if (u_topLine > 0.001) {
-    float tl = 1.0 - smoothstep(0.0, 0.035, yT);
+    // rainbow noise along the top of the picture, where a deck's vertical interval shows through
+    float tlH = max(u_tlHeight, 0.005), tl = 1.0 - smoothstep(tlH * 0.7, tlH, yT);
     float n = hash12(vec2(floor(uv.x * uRes.x * 0.2), line + fr));
-    vec3 spec = 0.5 + 0.5 * cos(6.2831853 * (uv.x * 5.0 + n * 0.6 + t * 0.5 + vec3(0.0, 0.33, 0.67)));
-    rgb = mix(rgb, spec * (0.35 + 0.65 * n), tl * u_topLine);
+    float scan = floor(yT / tlH * 6.0);
+    vec3 spec = 0.5 + 0.5 * cos(6.2831853 * (uv.x * (5.0 + scan * 3.0) + n * 0.6 + t * u_tlSpeed + vec3(0.0, 0.33, 0.67)));
+    rgb = mix(rgb, spec * (0.45 + 0.75 * n), tl * u_topLine);
   }
   if (u_headSwitch > 0.001) {
     float n = hash12(vec2(uv.x * uRes.x, line + fr));
-    rgb = mix(rgb, vec3(n) * 0.7 + rgb * 0.3, hs * u_headSwitch * 0.7 * step(0.45, hash12(vec2(line, fr * 1.1))));
+    float streak = 0.5 + 0.5 * step(0.4, hash12(vec2(line, fr * 1.1)));
+    rgb = mix(rgb, vec3(n) * 0.85 + rgb * 0.15, hs * u_headSwitch * u_hsNoise * streak);
   }
   if (seg > 0.0) {
     if (style == 0) rgb = mix(rgb, vec3(0.85 + 0.15 * hash12(uv * uRes + fr)), 0.92);
@@ -408,6 +449,16 @@ void main() {
 uniform sampler2D uTex;
 void main() { o = vec4(texture(uTex, vUv).rgb, 1.0); }`;
 
+  // the picture placed in the chosen aspect ratio: cropped to fill, or fitted with black bars
+  const FRAME = COMMON + `
+uniform sampler2D uTex;
+uniform vec2 uRectAt, uRectSize;
+void main() {
+  vec2 q = uRectAt + vUv * uRectSize;
+  bool inside = q.x >= 0.0 && q.x <= 1.0 && q.y >= 0.0 && q.y <= 1.0;
+  o = vec4(inside ? texture(uTex, q).rgb : vec3(0.0), 1.0);
+}`;
+
   // the tape's output over the picture that went in, by VHS Amount
   const TAPEMIX = COMMON + `
 uniform sampler2D uDry, uWet;
@@ -429,5 +480,5 @@ void main() {
   o = vec4(c, 1.0);
 }`;
 
-  window.AtlasShaders = { VERT, COMMON, MOSH, SIGNAL, COMP_ENC, COMP_DEC, PREGRADE, COPY, LINCOPY, BLUR, TAPEMIX };
+  window.AtlasShaders = { VERT, COMMON, MOSH, SIGNAL, COMP_ENC, COMP_DEC, PREGRADE, COPY, LINCOPY, BLUR, TAPEMIX, FRAME };
 })();

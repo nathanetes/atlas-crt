@@ -2,7 +2,7 @@
 // Control fields: k key, l label, min/max/step, d default, n value when the module
 // is switched off, u unit, opts for stepped choices, dirt = eased by Signal Clean, pow = the slider
 // follows this power curve so small values get most of its travel, dp = decimals shown, tape = a
-// setting of the tape stage, which Init and Randomize leave alone.
+// setting of the tape stage, which Init and Randomize leave alone, color = a colour held as 0xRRGGBB.
 (function () {
   const pick = (labels) => labels.map((l, v) => ({ v, l }));
   const steps = (vals, unit) => vals.map(v => ({ v, l: v + unit }));
@@ -26,6 +26,35 @@
   // the tape stage's controls, which match ntsc-rs's own settings, ranges and defaults
   const tape = (k, l, min, max, step, d, extra = {}) => ({ k, l, min, max, step, d, tape: 1, ...extra });
   const onOff = pick(['Off', 'On']);
+
+  // one glitch slot: what breaks, when, where, which way, how it moves, and what colour it comes out
+  const glitchSlot = (i) => {
+    const g = (s) => 'g' + i + s;
+    return {
+      id: 'glitch' + i, title: 'Glitch ' + i,
+      hint: i === 1 ? 'Four slots, each breaking the picture its own way. Open any control with its arrow for the details: size, position, direction, movement, edges and color.' : '',
+      controls: [
+        amt(g('Amt'), 'Amount'),
+        { k: g('Type'), l: 'Type', d: [0, 2, 5, 7][i - 1], opts: pick(['Slice Shift', 'Block Shift', 'Line Hold', 'Mosaic', 'Pixel Sort', 'Sparkle Dashes', 'Streaks', 'RGB Tear', 'Freeze', 'Invert']) },
+        { k: g('Rate'), l: 'How Often', min: 0.05, max: 30, step: 0.01, d: 2, u: '/s', pow: 2 },
+        { k: g('Len'), l: 'How Long', min: 0.01, max: 3, step: 0.01, d: 0.2, u: 's', pow: 2 },
+        { k: g('Chance'), l: 'Chance', min: 0, max: 1, step: 0.01, d: 0.6 },
+        { k: g('Size'), l: 'Height', min: 0.01, max: 1, step: 0.01, d: 0.35 },
+        { k: g('Width'), l: 'Width', min: 0.02, max: 1, step: 0.01, d: 1 },
+        { k: g('Count'), l: 'Bands', min: 1, max: 128, step: 1, d: 24, pow: 2 },
+        { k: g('Pos'), l: 'Position', min: 0, max: 1, step: 0.01, d: 0.5 },
+        { k: g('Spread'), l: 'Random Position', min: 0, max: 1, step: 0.01, d: 1 },
+        { k: g('Dir'), l: 'Direction', min: 0, max: 360, step: 1, d: 0, u: '°' },
+        { k: g('Move'), l: 'Movement', d: 0, opts: pick(['Still', 'Jump', 'Scan Forward', 'Scan Back', 'Sway', 'Bounce']) },
+        { k: g('Speed'), l: 'Move Speed', min: 0, max: 4, step: 0.01, d: 0.5 },
+        { k: g('Edge'), l: 'Stepped Edges', min: 0, max: 1, step: 0.01, d: 0.25 },
+        { k: g('Color'), l: 'Color', d: [0xff2a2a, 0x2a7bff, 0xffffff, 0x35ff8a][i - 1], color: 1 },
+        { k: g('Tint'), l: 'Tint', min: 0, max: 1, step: 0.01, d: 0 },
+        { k: g('Blend'), l: 'Blend', d: 0, opts: pick(['Normal', 'Add', 'Screen', 'Multiply', 'Difference', 'Color']) },
+        { k: g('Seed'), l: 'Pattern', min: 0, max: 99, step: 1, d: i },
+      ],
+    };
+  };
 
   const GROUPS = [
     {
@@ -131,6 +160,10 @@
         { k: 'hiHue', l: 'Highlight Color', min: 0, max: 360, step: 1, d: 35, u: '°' },
         amt('hiAmt', 'Highlight Tint'),
         amt('gmap', 'Gradient Map'),
+        { k: 'gmPal', l: 'Palette', d: 0, opts: pick(['Two Hues', 'Your Three Colors', 'Red Room', 'Thermal', 'Night Blue', 'Acid', 'Sunset', 'Ultraviolet']) },
+        { k: 'gmA', l: 'Shadows', d: 0x05050a, color: 1 },
+        { k: 'gmB', l: 'Midtones', d: 0xc01818, color: 1 },
+        { k: 'gmC', l: 'Highlights', d: 0xffd9a0, color: 1 },
         amt('cross', 'Cross Process'),
         { k: 'lift', l: 'Black Level', min: -0.2, max: 0.3, step: 0.005, d: 0, n: 0 },
         { k: 'gamma', l: 'Gamma', min: 0.4, max: 2.5, step: 0.01, d: 1, n: 1 },
@@ -139,6 +172,70 @@
         amt('invert', 'Invert'),
         { k: 'chanSwap', l: 'Channel Swap', d: 0, n: 0, opts: pick(['RGB', 'RBG', 'GRB', 'GBR', 'BRG', 'BGR']) },
         amt('grunge', 'Grunge'),
+      ],
+    },
+    {
+      id: 'colorfx', title: 'Color FX', hint: 'Big color moves that stay fully adjustable: burn, oil-slick iridescence, hue cycling and light leaks.',
+      controls: [
+        amt('burn', 'Burn'),
+        amt('irid', 'Iridescence'),
+        { k: 'iridBands', l: 'Bands', min: 0.2, max: 6, step: 0.01, d: 1.6 },
+        { k: 'iridLo', l: 'Tones From', min: 0, max: 1, step: 0.01, d: 0.45 },
+        { k: 'iridHi', l: 'Tones To', min: 0, max: 1.2, step: 0.01, d: 1.2 },
+        { k: 'iridWarp', l: 'Swirl', min: 0, max: 1, step: 0.01, d: 0.5 },
+        { k: 'iridSpeed', l: 'Flow Speed', min: 0, max: 1, step: 0.01, d: 0.1 },
+        { k: 'iridShift', l: 'Color Shift', min: 0, max: 1, step: 0.01, d: 0 },
+        { k: 'hueSpeed', l: 'Hue Cycle', min: -1, max: 1, step: 0.01, d: 0, n: 0, u: 'turns a second' },
+        { k: 'hueLuma', l: 'Hue by Brightness', min: -2, max: 2, step: 0.01, d: 0, n: 0 },
+        { k: 'huePos', l: 'Hue Across Picture', min: -2, max: 2, step: 0.01, d: 0, n: 0 },
+        amt('leak', 'Light Leak'),
+        { k: 'leakColor', l: 'Leak Color', d: 0xff4a18, color: 1 },
+        { k: 'leakPos', l: 'Leak Side', min: 0, max: 1, step: 0.01, d: 0 },
+        { k: 'leakSize', l: 'Leak Size', min: 0.05, max: 1, step: 0.01, d: 0.45 },
+        { k: 'leakSpeed', l: 'Leak Movement', min: 0, max: 2, step: 0.01, d: 0.4 },
+      ],
+    },
+    {
+      id: 'print', title: 'Stipple & Print', hint: 'Turns the picture into two colors: grainy stipple, a clean screen print, or halftone dots. Pick the ink and paper under Stipple.',
+      controls: [
+        amt('thr', 'Stipple'),
+        { k: 'thrLevel', l: 'Threshold', min: 0, max: 1, step: 0.01, d: 0.5 },
+        { k: 'thrSoft', l: 'Softness', min: 0, max: 1, step: 0.01, d: 0.05 },
+        { k: 'thrGrain', l: 'Grain', min: 0, max: 1, step: 0.01, d: 0.6, u: '0 is a clean screen print' },
+        { k: 'thrSize', l: 'Grain Size', min: 0, max: 1, step: 0.01, d: 0.15 },
+        { k: 'thrDetail', l: 'Detail', min: 0, max: 1, step: 0.01, d: 0.5, u: 'keeps features visible' },
+        { k: 'thrPrint', l: 'Paper Texture', min: 0, max: 1, step: 0.01, d: 0.2 },
+        { k: 'ink', l: 'Ink', d: 0x050506, color: 1 },
+        { k: 'paper', l: 'Paper', d: 0xf5f2ea, color: 1 },
+        amt('ht', 'Halftone'),
+        { k: 'htSize', l: 'Dot Size', min: 0, max: 1, step: 0.01, d: 0.3 },
+        { k: 'htAngle', l: 'Screen Angle', min: 0, max: 90, step: 1, d: 45, u: '°' },
+      ],
+    },
+    {
+      id: 'mixer', title: 'Channel Mixer', hint: 'How much of each color goes into each output channel.',
+      controls: [
+        { k: 'mxRR', l: 'Red from Red', min: -1, max: 2, step: 0.01, d: 1, n: 1 },
+        { k: 'mxRG', l: 'Red from Green', min: -1, max: 2, step: 0.01, d: 0, n: 0 },
+        { k: 'mxRB', l: 'Red from Blue', min: -1, max: 2, step: 0.01, d: 0, n: 0 },
+        { k: 'mxGR', l: 'Green from Red', min: -1, max: 2, step: 0.01, d: 0, n: 0 },
+        { k: 'mxGG', l: 'Green from Green', min: -1, max: 2, step: 0.01, d: 1, n: 1 },
+        { k: 'mxGB', l: 'Green from Blue', min: -1, max: 2, step: 0.01, d: 0, n: 0 },
+        { k: 'mxBR', l: 'Blue from Red', min: -1, max: 2, step: 0.01, d: 0, n: 0 },
+        { k: 'mxBG', l: 'Blue from Green', min: -1, max: 2, step: 0.01, d: 0, n: 0 },
+        { k: 'mxBB', l: 'Blue from Blue', min: -1, max: 2, step: 0.01, d: 1, n: 1 },
+      ],
+    },
+    glitchSlot(1), glitchSlot(2), glitchSlot(3), glitchSlot(4),
+    {
+      id: 'warp', title: 'Warp', hint: 'Bends the whole picture before it reaches the signal.',
+      controls: [
+        amt('warp', 'Warp'),
+        { k: 'warpType', l: 'Type', d: 0, opts: pick(['Flow', 'Liquid', 'Horizontal Waves', 'Vertical Waves', 'Ripple', 'Swirl', 'Mirror Fold', 'Pinch & Bulge']) },
+        { k: 'warpScale', l: 'Scale', min: 0, max: 1, step: 0.01, d: 0.3 },
+        { k: 'warpSpeed', l: 'Speed', min: 0, max: 3, step: 0.01, d: 0.5 },
+        { k: 'warpTurb', l: 'Turbulence', min: 0, max: 1, step: 0.01, d: 0.3 },
+        { k: 'warpStutter', l: 'Stutter', min: 0, max: 1, step: 0.01, d: 0 },
       ],
     },
     {
@@ -179,6 +276,8 @@
       controls: [
         amt('shake', 'Shake', 0, { dirt: 1 }),
         amt('tear', 'Tear', 0, { dirt: 1 }),
+        { k: 'tearHeight', l: 'Tear Height', min: 0, max: 1, step: 0.01, d: 0.3 },
+        { k: 'tearSpeed', l: 'Tear Speed', min: 0, max: 4, step: 0.01, d: 1 },
         amt('roll', 'Vertical Roll', 0, { dirt: 1 }),
         amt('flash', 'Exposure Flash', 0, { dirt: 1 }),
         amt('dropout', 'Dropouts', 0, { dirt: 1 }),
@@ -186,7 +285,12 @@
         amt('hum', 'Hum Band', 0, { dirt: 1 }),
         { k: 'echo', l: 'Signal Echo', min: -1, max: 1, step: 0.01, d: 0, n: 0, dirt: 1 },
         amt('headSwitch', 'Head-Switch Band', 0, { dirt: 1 }),
+        { k: 'hsHeight', l: 'Band Height', min: 0.01, max: 0.4, step: 0.005, d: 0.08 },
+        { k: 'hsShift', l: 'Band Shift', min: 0, max: 1, step: 0.01, d: 0.5 },
+        { k: 'hsNoise', l: 'Band Noise', min: 0, max: 1, step: 0.01, d: 0.7 },
         amt('topLine', 'Top-Line Spectral', 0, { dirt: 1 }),
+        { k: 'tlHeight', l: 'Band Height', min: 0.01, max: 0.4, step: 0.005, d: 0.06 },
+        { k: 'tlSpeed', l: 'Color Speed', min: 0, max: 3, step: 0.01, d: 0.5 },
       ],
     },
     {
@@ -200,6 +304,9 @@
         amt('dust', 'Dust'),
         amt('scratch', 'Scratches'),
         { k: 'dustOpacity', l: 'Dust Opacity', min: 0, max: 1, step: 0.01, d: 1 },
+        { k: 'dustSize', l: 'Dust Size', min: 0, max: 1, step: 0.01, d: 0.4 },
+        { k: 'dustSoft', l: 'Dust Softness', min: 0, max: 1, step: 0.01, d: 0.4 },
+        { k: 'dustHold', l: 'Dust Hold', min: 0, max: 1, step: 0.01, d: 0, u: 'how long specks stay' },
         amt('weave', 'Gate Weave'),
         amt('grain', 'Tape Grain', 0.04, { dirt: 1 }),
         amt('rf', 'RF Specks', 0, { dirt: 1 }),
@@ -247,6 +354,7 @@
         amt('moire', 'Moiré Bands'),
         { k: 'moireScale', l: 'Moiré Scale', min: 0, max: 1, step: 0.01, d: 0.25, u: 'single pixels → chunky' },
         { k: 'moireGrid', l: 'Moiré Grid', d: 0, opts: pick(['Pixel Grid', 'Aperture Grille', 'Slot Mask', 'Delta Dot', 'Same as Screen']) },
+        { k: 'moireContrast', l: 'Fringe Contrast', min: 0, max: 1.5, step: 0.01, d: 0.55 },
         { k: 'moireCells', l: 'Pixel Visibility', min: 0, max: 1, step: 0.01, d: 0.5 },
         { k: 'moireColor', l: 'Moiré Color', min: 0, max: 1, step: 0.01, d: 0.3 },
         { k: 'moireCover', l: 'Moiré Coverage', min: 0, max: 1, step: 0.01, d: 0.4, u: 'room light: lit areas → whole frame' },
@@ -254,7 +362,15 @@
         { k: 'moireAngle', l: 'Moiré Angle', min: -45, max: 45, step: 0.1, d: 0, u: '°' },
         { k: 'moireCurve', l: 'Tube Curvature', min: 0, max: 1, step: 0.01, d: 0.65 },
         { k: 'moireView', l: 'Camera Position', min: -1, max: 1, step: 0.01, d: 0, u: 'left → right' },
+        { k: 'moireSway', l: 'Handheld Sway', min: 0, max: 1, step: 0.01, d: 0.35 },
+        { k: 'moireTiltX', l: 'Camera Pan', min: -1, max: 1, step: 0.01, d: 0 },
+        { k: 'moireTiltY', l: 'Camera Tilt', min: -1, max: 1, step: 0.01, d: 0 },
         { k: 'moireRings', l: 'Moiré Rings', min: -1, max: 1, step: 0.01, d: 0.2 },
+        { k: 'moireWarp', l: 'Glass Ripple', min: 0, max: 1, step: 0.01, d: 0.35 },
+        { k: 'moireWarpScale', l: 'Ripple Size', min: 0, max: 1, step: 0.01, d: 0.35 },
+        { k: 'moireFocus', l: 'Focus Falloff', min: 0, max: 1, step: 0.01, d: 0.45 },
+        { k: 'moireWeave', l: 'Weave', min: 0, max: 1, step: 0.01, d: 0.25 },
+        { k: 'moireNoise', l: 'Sensor Noise', min: 0, max: 1, step: 0.01, d: 0.2 },
         { k: 'moireDrift', l: 'Moiré Drift', min: 0, max: 1, step: 0.01, d: 0.2 },
         amt('capture', 'Screen Pulse'),
         { k: 'shutter', l: 'Shutter', d: 48, opts: [24, 30, 48, 50, 60, 96, 120, 250, 500].map(v => ({ v, l: '1/' + v })) },
@@ -286,10 +402,37 @@
     },
   ];
 
+  // Detail controls live in a dropdown under the control they belong to, so a module opens simple
+  const UNDER = {
+    film: ['filmSize', 'filmColor', 'filmResp', 'filmVar'], dust: ['dustOpacity', 'dustSize', 'dustSoft', 'dustHold'],
+    rf: ['speckOpacity', 'speckSize'], smear: ['smearDir', 'smearThresh'], conv: ['convAngle'],
+    mosh: ['moshBlock', 'moshGain', 'moshDrift', 'moshRefresh', 'moshResid'],
+    bend: ['bendDir', 'bendMotion', 'bendFreq', 'bendQ', 'bendBoost', 'bendLo', 'bendHi', 'bendFb', 'bendDelay'],
+    waves: ['waveCount', 'waveReact', 'waveSmooth', 'waveOrient', 'waveColor', 'waveDir', 'waveBlend'],
+    tear: ['tearHeight', 'tearSpeed'], headSwitch: ['hsHeight', 'hsShift', 'hsNoise'], topLine: ['tlHeight', 'tlSpeed'],
+    capture: ['shutter', 'pulseContrast', 'bandAngle', 'readout'],
+    moireView: ['moireSway', 'moireTiltX', 'moireTiltY'], moireRings: ['moireWarp', 'moireWarpScale'],
+    moireContrast: ['moireFocus', 'moireWeave', 'moireNoise'],
+    shAmt: ['shHue'], hiAmt: ['hiHue'], gmap: ['gmPal', 'gmA', 'gmB', 'gmC'],
+    irid: ['iridBands', 'iridLo', 'iridHi', 'iridWarp', 'iridSpeed', 'iridShift'],
+    leak: ['leakColor', 'leakPos', 'leakSize', 'leakSpeed'],
+    thr: ['thrLevel', 'thrDetail', 'thrSoft', 'thrGrain', 'thrSize', 'thrPrint', 'ink', 'paper'], ht: ['htSize', 'htAngle'],
+    warp: ['warpType', 'warpScale', 'warpSpeed', 'warpTurb', 'warpStutter'],
+    vhsEdge: ['vhsEdgeSpeed', 'vhsEdgeFreq', 'vhsEdgeDetail'],
+    vhsHead: ['vhsHeadOffset', 'vhsHeadShift', 'vhsMid', 'vhsMidPos', 'vhsMidJitter'],
+    vhsTrack: ['vhsTrackWave', 'vhsTrackSnow', 'vhsTrackAniso', 'vhsTrackNoise'], vhsSharpen: ['vhsSharpenFreq'],
+    vhsCompNoise: ['vhsCompFreq', 'vhsCompDetail'], vhsSnow: ['vhsSnowAniso'], vhsRing: ['vhsRingFreq', 'vhsRingPower'],
+    vhsLumaNoise: ['vhsLumaFreq', 'vhsLumaDetail'], vhsChromaNoise: ['vhsChromaFreq', 'vhsChromaDetail'],
+  };
+  [1, 2, 3, 4].forEach((i) => {
+    UNDER['g' + i + 'Amt'] = ['Chance', 'Size', 'Width', 'Count', 'Pos', 'Spread', 'Dir', 'Move', 'Speed', 'Edge', 'Color', 'Tint', 'Blend', 'Seed'].map((s) => 'g' + i + s);
+  });
+
   const ALL = [...MASTER, ...MACROS, ...GROUPS.flatMap(g => g.controls)];
   const DEFAULTS = {};
   const BY_KEY = {};
   ALL.forEach(c => { DEFAULTS[c.k] = c.d; BY_KEY[c.k] = c; });
+  for (const parent in UNDER) UNDER[parent].forEach((k) => { BY_KEY[k].of = parent; });
 
   // Init: a blank slate to build a look from. Every control that has a neutral value (n, what it
   // takes when its module is switched off) is set to it; the rest only shape effects that are off.
@@ -299,12 +442,29 @@
   // a slow random LFO that glides from value to value, for a factory look
   const wander = (rate, depth, seed) => ({ mode: 'lfo', lfo: { wave: 'random', rate, depth, smooth: 1, seed } });
 
+  // Raising moiré from nothing starts these, so the fringes are never a still pattern
+  const MOIRE_MOTION = { moireAngle: wander(0.27, 0.05, 3.1), moireCurve: wander(0.19, 0.3, 5.7), moireView: wander(0.23, 0.4, 8.2), moireRings: wander(0.21, 0.4, 11.4) };
+
   // the tape on its own, with the tube out of the way, and the same tape played on a TV
   const TAPE = { ...INIT, vhs: 1 };
   const TAPE_ON_TV = { ...TAPE, gamut: 1, maskType: 0, maskScale: 0.3, phosphor: 0.5, scanlines: 0.45, curve: 0.3, glow: 0.3, halation: 0.15, vignette: 0.3, overscan: 0.08 };
 
   // Factory looks. Each is a full look laid over DEFAULTS, in a category from CATS.
   const PRESETS = [
+    // Creative: the fast way in. Each one is a start, and every part of it stays adjustable.
+    { cat: 'Creative', name: 'Stipple', p: { ...INIT, thr: 1, thrLevel: 0.55, thrGrain: 0.9, thrDetail: 0.7, thrSize: 0.12, thrSoft: 0.02, ink: 0x000000, paper: 0xffffff } },
+    { cat: 'Creative', name: 'Stipple Red', p: { ...INIT, thr: 1, thrLevel: 0.52, thrGrain: 0.75, thrDetail: 0.6, thrSize: 0.05, thrSoft: 0.15, ink: 0x080000, paper: 0xb80000 } },
+    { cat: 'Creative', name: 'Screen Print', p: { ...INIT, thr: 1, thrLevel: 0.46, thrGrain: 0.03, thrDetail: 0.85, thrSoft: 0.03, thrPrint: 0.5, ink: 0xc40f16, paper: 0x0b9fe0, warp: 0.1, warpType: 3, warpScale: 0.45, warpSpeed: 0.3 } },
+    { cat: 'Creative', name: 'Acid Print', p: { ...INIT, thr: 1, thrLevel: 0.42, thrGrain: 0.1, thrDetail: 0.85, thrSoft: 0.02, thrPrint: 0.7, ink: 0x14171a, paper: 0x3cea62, ht: 0.25, htSize: 0.08 } },
+    { cat: 'Creative', name: 'Red Room', p: { ...INIT, gmap: 1, gmPal: 2, contrast: 1.12, halation: 0.35, glow: 0.2, film: 0.12, vignette: 0.25 } },
+    { cat: 'Creative', name: 'Oil Slick', p: { ...INIT, gmap: 0.88, gmPal: 4, contrast: 1.1, irid: 0.9, iridLo: 0.6, iridHi: 1.2, iridBands: 1.3, iridWarp: 0.6, iridSpeed: 0.06, film: 0.22, filmSize: 0.4, vignette: 0.2 } },
+    { cat: 'Creative', name: 'Expired Film', p: { ...INIT, glow: 0.35, postGlow: 0.3, halation: 0.55, sat: 1.25, temp: 0.2, lift: 0.05, shHue: 200, shAmt: 0.3, hiHue: 30, hiAmt: 0.15, film: 0.4, filmSize: 0.5, filmColor: 0.5, dust: 0.3, leak: 0.3, leakSize: 0.35, leakPos: 0.02, vignette: 0.3 } },
+    { cat: 'Creative', name: 'Burnt CRT', p: { ...INIT, drive: 1.1, maskType: 1, maskScale: 0.25, phosphor: 0.6, scanlines: 0.55, curve: 0.2, glow: 0.3, pbloom: 0.35, gmap: 0.62, gmPal: 7, burn: 0.2, sat: 1.2, vignette: 0.3 } },
+    { cat: 'Creative', name: 'Data Rot', p: { ...INIT, gmap: 0.5, gmPal: 7, dust: 0.65, scratch: 0.4, film: 0.15, g1Amt: 0.9, g1Type: 2, g1Rate: 0.5, g1Len: 1.4, g1Chance: 0.8, g1Size: 0.34, g1Pos: 0.2, g1Spread: 0.25, g1Count: 60, g1Edge: 0.2, g2Amt: 0.75, g2Type: 3, g2Rate: 1, g2Len: 0.6, g2Chance: 0.7, g2Size: 0.4, g2Width: 0.6, g2Count: 90, g3Amt: 0.6, g3Type: 5, g3Rate: 4, g3Len: 0.2, g3Chance: 0.6, g3Size: 0.7 } },
+    { cat: 'Creative', name: 'Slice Cinema', p: { ...INIT, sat: 1.15, temp: 0.3, contrast: 1.2, film: 0.3, dust: 0.3, scratch: 0.3, vignette: 0.4, g1Amt: 0.3, g1Type: 0, g1Rate: 3, g1Len: 0.18, g1Chance: 0.7, g1Size: 0.5, g1Count: 12, g1Edge: 0.5, g2Amt: 0.55, g2Type: 6, g2Dir: 90, g2Rate: 1.5, g2Len: 0.4, g2Chance: 0.6, g2Size: 0.6, g2Tint: 1, g2Color: 0x20e070, g3Amt: 0.7, g3Type: 1, g3Rate: 0.7, g3Len: 0.35, g3Chance: 0.6, g3Size: 0.3, g3Width: 0.5, g3Count: 8, g3Move: 1 } },
+    { cat: 'Creative', name: 'Sparkle Static', p: { ...INIT, drive: 1.2, maskType: 2, maskScale: 0.2, phosphor: 0.5, scanlines: 0.4, bleed: 0.5, sharpen: 0.4, g1Amt: 0.4, g1Type: 5, g1Rate: 12, g1Len: 0.08, g1Chance: 0.9, g1Size: 1, g2Amt: 0.5, g2Type: 1, g2Rate: 2.5, g2Len: 0.2, g2Chance: 0.6, g2Size: 0.5, g2Count: 16, g3Amt: 0.4, g3Type: 0, g3Rate: 5, g3Len: 0.1, g3Chance: 0.5, g3Size: 0.4 } },
+    { cat: 'Creative', name: 'Liquid Dream', p: { ...INIT, warp: 0.35, warpType: 0, warpScale: 0.25, warpTurb: 0.5, sat: 1.4, hueSpeed: 0.06, hueLuma: 0.5, glow: 0.4, halation: 0.3, film: 0.15, vignette: 0.25 } },
+
     { cat: 'TV', name: 'Init', p: INIT },
     // TV: sets in a room, from studio monitors to arcade cabinets
     { cat: 'TV', name: 'Living Room Tube', p: { composite: 2, lumaBW: 2, maskType: 0, maskScale: 0.3, phosphor: 0.6, scanlines: 0.55, curve: 0.45, glow: 0.35, halation: 0.2, bleed: 0.3, conv: 0.15, spectral: 0.1, overscan: 0.12 } },
@@ -330,12 +490,12 @@
     { cat: 'Tape', name: 'Late Night Ad', p: { composite: 2, lumaBW: 2, chroma: 1.6, hueDrift: 0.15, bleed: 0.7, rgbSplit: 0.2, halation: 0.5, postGlow: 0.4, glow: 0.4, sharpen: 0.5, echo: 0.3, scanlines: 0.4, curve: 0.3, tear: 0.05 } },
 
     // Camera: the tube seen through a lens and a sensor
-    { cat: 'Camera', name: 'Pixel Moiré', p: { rainbow: 0.85, moire: 0.3, moireScale: 0.07, moireGrid: 2, moireCells: 0.5, moireColor: 0.6, moireCover: 0.5, moirePitch: 0.2, moireAngle: 0, moireRings: 0.05, moireDrift: 0.15, scanlines: 0.6, bleed: 0.3, sharpen: 0.3, rgbSplit: 0.25, grain: 0.1, curve: 0.15, vignette: 0.4, glow: 0.2 } },
-    { cat: 'Camera', name: 'Moiré Screen', p: { rainbow: 1, moire: 0.5, moireScale: 0.14, moireGrid: 1, moireCells: 0.1, moireColor: 1, moireCover: 0.8, moirePitch: 0.06, moireAngle: 0, moireCurve: 0.5, moireView: 0, moireRings: 0, moireDrift: 0.1, scanlines: 0.5, curve: 0.15, vignette: 0.35, glow: 0.2 },
-      auto: { moireAngle: wander(0.27, 0.09, 3.1), moireCurve: wander(0.19, 0.42, 5.7), moireView: wander(0.23, 0.55, 8.2), moireRings: wander(0.21, 0.5, 11.4) } },
-    { cat: 'Camera', name: 'Phone Off Screen', p: { maskType: 1, maskScale: 0.1, phosphor: 0.8, rainbow: 0.6, moire: 0.3, moireGrid: 4, moireCover: 0.3, moirePitch: 0.3, moireAngle: 2, moireRings: 0.35, moireDrift: 0.1, curve: 0.2, glow: 0.3, halation: 0.3, softness: 0.4, temp: 0.15, film: 0.1 } },
-    { cat: 'Camera', name: 'Rainbow Grille', p: { maskType: 1, maskScale: 0.08, phosphor: 0.9, rainbow: 0.85, moire: 0.4, moireGrid: 4, moireCover: 0.2, moirePitch: 0.15, moireAngle: 0.5, moireRings: -0.5, moireDrift: 0.1, curve: 0.3, glow: 0.3, scanlines: 0.5 } },
-    { cat: 'Camera', name: 'Filmed Off TV', p: { capture: 0.7, shutter: 48, refresh: 59.94, pulseContrast: 0.8, rainbow: 0.35, moire: 0.2, moireGrid: 4, moireCover: 0.2, moireDrift: 0.1, maskType: 0, maskScale: 0.12, phosphor: 0.8, scanlines: 0.7, curve: 0.5, glow: 0.4, conv: 0.25, overscan: 0.15, persistence: 0.3, film: 0.15 } },
+    { cat: 'Camera', name: 'Pixel Moiré', p: { rainbow: 0.85, moire: 0.3, moireScale: 0.07, moireGrid: 2, moireCells: 0.5, moireColor: 0.6, moireCover: 0.5, moirePitch: 0.2, moireAngle: 0, moireRings: 0.05, moireDrift: 0.15, scanlines: 0.6, bleed: 0.3, sharpen: 0.3, rgbSplit: 0.25, grain: 0.1, curve: 0.15, vignette: 0.4, glow: 0.2 }, auto: MOIRE_MOTION },
+    { cat: 'Camera', name: 'Moiré Screen', p: { rainbow: 1, moire: 0.5, moireScale: 0.05, moireGrid: 0, moireCells: 0.35, moireColor: 0.7, moireCover: 0.8, moirePitch: 0.14, moireContrast: 0.9, moireWarp: 0.5, moireFocus: 0.5, moireWeave: 0.5, moireDrift: 0.1, scanlines: 0.5, curve: 0.15, vignette: 0.35, glow: 0.2, drive: 1.15 }, auto: MOIRE_MOTION },
+    { cat: 'Camera', name: 'Rainbow Streaks', p: { rainbow: 1, moire: 0.5, moireScale: 0.14, moireGrid: 1, moireCells: 0.1, moireColor: 1, moireCover: 0.8, moirePitch: 0.06, moireContrast: 0.85, moireWarp: 0.55, moireFocus: 0.55, moireWeave: 0.35, moireDrift: 0.1, scanlines: 0.5, curve: 0.15, vignette: 0.35, glow: 0.2, drive: 1.15 }, auto: MOIRE_MOTION },
+    { cat: 'Camera', name: 'Phone Off Screen', p: { maskType: 1, maskScale: 0.1, phosphor: 0.8, rainbow: 0.6, moire: 0.3, moireGrid: 4, moireCover: 0.3, moirePitch: 0.3, moireAngle: 2, moireRings: 0.35, moireDrift: 0.1, curve: 0.2, glow: 0.3, halation: 0.3, softness: 0.4, temp: 0.15, film: 0.1 }, auto: MOIRE_MOTION },
+    { cat: 'Camera', name: 'Rainbow Grille', p: { maskType: 1, maskScale: 0.08, phosphor: 0.9, rainbow: 0.85, moire: 0.4, moireGrid: 4, moireCover: 0.2, moirePitch: 0.15, moireAngle: 0.5, moireRings: -0.5, moireDrift: 0.1, curve: 0.3, glow: 0.3, scanlines: 0.5 }, auto: MOIRE_MOTION },
+    { cat: 'Camera', name: 'Filmed Off TV', p: { capture: 0.7, shutter: 48, refresh: 59.94, pulseContrast: 0.8, rainbow: 0.35, moire: 0.2, moireGrid: 4, moireCover: 0.2, moireDrift: 0.1, maskType: 0, maskScale: 0.12, phosphor: 0.8, scanlines: 0.7, curve: 0.5, glow: 0.4, conv: 0.25, overscan: 0.15, persistence: 0.3, film: 0.15 }, auto: MOIRE_MOTION },
     { cat: 'Camera', name: 'Rolling Shutter', p: { capture: 1, shutter: 250, refresh: 60, pulseContrast: 1.4, bandAngle: 12, readout: 0.4, persistence: 0.35, curve: 0.35, phosphor: 0.7, glow: 0.35 } },
     { cat: 'Camera', name: '16mm Print', p: { phosphor: 0, scanlines: 0, curve: 0, vignette: 0.55, conv: 0, bleed: 0.1, film: 0.6, filmSize: 0.6, filmColor: 0.45, filmVar: 0.7, dust: 0.45, weave: 0.5, halation: 0.35, glow: 0.2, temp: 0.15, lift: 0.04, contrast: 1.1, sat: 0.9, overscan: 0, gamut: 0 } },
     { cat: 'Camera', name: 'Night Shift', p: { composite: 2, lumaBW: 4, chroma: 0.15, gain: 1.3, grain: 0.55, rf: 0.15, sharpen: 0.6, scanlines: 0.5, hum: 0.35, shake: 0.05, contrast: 1.3, curve: 0.2, glow: 0.3, flicker: 0.2, bleed: 0.2 } },
@@ -361,7 +521,7 @@
     { cat: 'Glitch', name: 'Lost Sync', p: { roll: 0.45, sync: 0.8, tear: 0.4, shake: 0.3, hum: 0.5, headSwitch: 0.5, flicker: 0.3 } },
   ];
 
-  const CATS = ['TV', 'Tape', 'Camera', 'Terminal', 'Color', 'Glitch'];
+  const CATS = ['Creative', 'TV', 'Tape', 'Camera', 'Terminal', 'Color', 'Glitch'];
 
-  window.AtlasParams = { MASTER, MACROS, GROUPS, DEFAULTS, BY_KEY, PRESETS, CATS };
+  window.AtlasParams = { MASTER, MACROS, GROUPS, DEFAULTS, BY_KEY, PRESETS, CATS, MOIRE_MOTION };
 })();

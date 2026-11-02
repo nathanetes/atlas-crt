@@ -173,11 +173,28 @@
             <h2 class="sec-title">Render</h2>
             <div class="field-row"><span class="field-name" id="qLabel">Raster</span><div id="quality" aria-labelledby="qLabel"></div></div>
             <div class="field-row">
+              <label class="field-name" for="ratioSel">Aspect Ratio</label>
+              <select class="select" id="ratioSel">
+                <option value="0">Source</option>
+                <option value="1.7778">16:9</option>
+                <option value="0.5625">9:16</option>
+                <option value="1">1:1</option>
+                <option value="0.8">4:5</option>
+                <option value="1.3333">4:3</option>
+                <option value="2.3333">21:9</option>
+              </select>
+            </div>
+            <div class="field-row" id="fitRow" hidden>
+              <span class="field-name">Fit</span>
+              <div id="fitSeg"></div>
+            </div>
+            <div class="field-row">
               <label class="field-name" for="outSize">Output</label>
               <select class="select" id="outSize">
                 <option value="720">720p</option>
                 <option value="1080" selected>1080p</option>
                 <option value="1440">1440p</option>
+                <option value="2160">4K</option>
                 <option value="source">Source size</option>
               </select>
             </div>
@@ -321,6 +338,7 @@
 
 <script src="src/shaders.js"></script>
 <script src="src/screen-shader.js"></script>
+<script src="src/glitch-shader.js"></script>
 <script src="src/vhs.js"></script>
 <script src="src/engine.js"></script>
 <script src="src/params.js"></script>
@@ -330,6 +348,7 @@
 <script src="src/rack.js"></script>
 <script src="src/timeline.js"></script>
 <script src="src/settings.js"></script>
+<script src="src/mp4.js"></script>
 <script src="src/export.js"></script>
 </body>
 </html>
