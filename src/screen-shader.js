@@ -25,7 +25,107 @@ const mat3 P22_D93 = mat3(0.5845, 0.0111, -0.0010, 0.0378, 0.7270, -0.0033, 0.01
 uniform float u_postExp, u_hue, u_sat, u_temp, u_tintGM, u_shHue, u_shAmt, u_hiHue, u_hiAmt, u_lift, u_gamma;
 uniform float u_poster, u_solar, u_gmap, u_cross, u_invert, u_chanSwap, u_grunge, u_crush;
 uniform float u_drive;
+uniform float u_moireContrast, u_moireFocus, u_moireWarp, u_moireWarpScale, u_moireWeave, u_moireNoise;
+uniform float u_dustSize, u_dustSoft, u_dustHold;
+// Color FX
+uniform vec3 u_ink, u_paper, u_gmA, u_gmB, u_gmC, u_leakColor;
+uniform float u_thr, u_thrLevel, u_thrSoft, u_thrGrain, u_thrSize, u_thrPrint, u_thrDetail;
+uniform float u_ht, u_htSize, u_htAngle;
+uniform float u_irid, u_iridBands, u_iridLo, u_iridHi, u_iridWarp, u_iridSpeed, u_iridShift;
+uniform float u_gmPal, u_burn, u_hueLuma, u_huePos, u_hueSpeed;
+uniform float u_mxRR, u_mxRG, u_mxRB, u_mxGR, u_mxGG, u_mxGB, u_mxBR, u_mxBG, u_mxBB;
+uniform float u_leak, u_leakPos, u_leakSize, u_leakSpeed;
 uniform float u_film, u_filmSize, u_filmColor, u_filmResp, u_filmVar, u_dust, u_scratch, u_dustOpacity, u_weave;
+
+// ---------------------------------------------------------------- Color FX
+vec3 hueTurn(vec3 c, float a) { vec3 y = RGB2YIQ * c; y.yz = rot(a) * y.yz; return YIQ2RGB * y; }
+
+// Gradient Map's colour for a brightness: two hues, your own three colours, or a palette
+vec3 ramp4(float l, vec3 a, vec3 b, vec3 c, vec3 d) {
+  float x = l * 3.0;
+  return x < 1.0 ? mix(a, b, x) : x < 2.0 ? mix(b, c, x - 1.0) : mix(c, d, x - 2.0);
+}
+vec3 gradientMap(float l, vec3 shC, vec3 hiC) {
+  int p = int(u_gmPal + 0.5);
+  if (p == 1) return l < 0.5 ? mix(u_gmA, u_gmB, l * 2.0) : mix(u_gmB, u_gmC, l * 2.0 - 1.0);
+  if (p == 2) return ramp4(l, vec3(0.02, 0.0, 0.0), vec3(0.42, 0.0, 0.0), vec3(0.93, 0.04, 0.02), vec3(1.0, 0.34, 0.15));  // Red Room
+  if (p == 3) return ramp4(l, vec3(0.02, 0.0, 0.12), vec3(0.65, 0.0, 0.55), vec3(1.0, 0.45, 0.0), vec3(1.0, 1.0, 0.75));  // Thermal
+  if (p == 4) return ramp4(l, vec3(0.0, 0.01, 0.1), vec3(0.03, 0.14, 0.5), vec3(0.32, 0.6, 1.0), vec3(1.0, 0.95, 0.75));  // Night Blue
+  if (p == 5) return ramp4(l, vec3(0.0, 0.05, 0.02), vec3(0.0, 0.55, 0.3), vec3(0.55, 1.0, 0.1), vec3(1.0, 1.0, 0.6));    // Acid
+  if (p == 6) return ramp4(l, vec3(0.1, 0.0, 0.22), vec3(0.85, 0.08, 0.42), vec3(1.0, 0.5, 0.15), vec3(1.0, 0.92, 0.6));  // Sunset
+  if (p == 7) return ramp4(l, vec3(0.05, 0.0, 0.2), vec3(0.3, 0.2, 0.95), vec3(0.95, 0.4, 0.85), vec3(1.0, 0.92, 0.95));  // Ultraviolet
+  return mix(shC * 0.12, mix(hiC, vec3(1.0), 0.3), l);
+}
+
+vec3 colorFx(vec3 col, vec2 uv, vec2 suv, float t) {
+  vec2 aq = uv * vec2(uAspect, 1.0);
+  col = vec3(dot(col, vec3(u_mxRR, u_mxRG, u_mxRB)), dot(col, vec3(u_mxGR, u_mxGG, u_mxGB)), dot(col, vec3(u_mxBR, u_mxBG, u_mxBB)));
+
+  // Hue Cycle: hue turns with brightness, across the picture, and over time
+  float turn = u_hueLuma * lum(col) + u_huePos * (uv.x + uv.y) + u_hueSpeed * t;
+  if (abs(turn) > 0.001) col = hueTurn(col, turn * 6.2831853);
+
+  // Burn: contrast pushed until the colours clip, like a print left under the lamp
+  if (u_burn > 0.001) {
+    float y = lum(max(col, 0.0));
+    col = mix(vec3(y), col, 1.0 + u_burn * 1.1);
+    col = clamp((col - 0.5) * (1.0 + u_burn * 2.6) + 0.5 + u_burn * 0.08, 0.0, 1.0);
+  }
+
+  // Iridescence: colour from a thin film, as on oil. Each colour's wavelength beats differently
+  // against the film's thickness, which follows the picture's brightness and a slow noise.
+  if (u_irid > 0.001) {
+    float l = lum(max(col, 0.0));
+    float w = smoothstep(u_iridLo - 0.08, u_iridLo + 0.08, l) * (1.0 - smoothstep(u_iridHi - 0.08, u_iridHi + 0.08, l));
+    float tt = t * u_iridSpeed;
+    float n = vnoise(aq * 2.1 + tt) + 0.6 * vnoise(aq * 5.3 - tt * 1.4 + 3.0) + 0.3 * vnoise(aq * 13.0 + tt * 0.7);
+    float film = (l * 2.0 + n * u_iridWarp * 2.4) * u_iridBands + u_iridShift;
+    vec3 sheen = 0.5 + 0.5 * cos(6.2831853 * (film * vec3(1.0, 1.21, 1.47) + vec3(0.0, 0.2, 0.45)));
+    // it's a film over the picture: keeping the picture's light underneath stops it looking like paint
+    sheen = col * 0.45 + sheen * (0.18 + 0.82 * l) * vec3(0.92, 0.9, 1.0);
+    col = mix(col, max(sheen, 0.0), w * u_irid);
+  }
+
+  // Halftone: ink dots on a turned grid, bigger where the picture is darker
+  if (u_ht > 0.001) {
+    float size = mix(3.0, 26.0, u_htSize) * uScale;
+    vec2 g = rot(radians(u_htAngle)) * gl_FragCoord.xy / size;
+    float d = length(fract(g) - 0.5) * 1.414;
+    float dots = smoothstep(-0.07, 0.07, sqrt(clamp(1.0 - lum(col), 0.0, 1.0)) - d);
+    col = mix(col, mix(col * 1.1 + 0.05, col * 0.08, dots), u_ht);
+  }
+
+  // Stipple: the picture thresholded to two colours through grain, so tones dissolve into dots.
+  // Soft is how gradual the edge is; with Grain at zero it's a clean screen print.
+  if (u_thr > 0.001) {
+    float size = mix(0.8, 6.0, u_thrSize) * max(uScale, 0.35);
+    vec2 g = gl_FragCoord.xy / size;
+    float grain = (hash12(floor(g) + 0.5) - 0.5) * 0.8 + (vnoise(g * 0.31) - 0.5) * 0.45;
+    float v = lum(max(col, 0.0));
+    // Detail: compare each point with its surroundings, so features survive however the photo was lit
+    v += (v - lum(toGam(texture(uBlurC, suv).rgb))) * u_thrDetail * 3.0;
+    v += grain * u_thrGrain;
+    float s = max(u_thrSoft * 0.4, 0.001);
+    float b = smoothstep(u_thrLevel - s, u_thrLevel + s, v);
+    vec3 two = mix(u_ink, u_paper, b);
+    if (u_thrPrint > 0.001) {   // the texture of ink on paper
+      float fibre = vnoise(aq * vec2(90.0, 240.0)) * 0.6 + vnoise(aq * 9.0) * 0.4;
+      two *= 1.0 + u_thrPrint * 0.5 * (fibre - 0.5);
+      two = mix(two, two * step(0.1, hash12(floor(gl_FragCoord.xy * 0.5 / max(uScale, 0.35)) + 3.0)), u_thrPrint * 0.35 * (1.0 - b));
+    }
+    col = mix(col, two, u_thr);
+  }
+
+  // Light Leak: light fogging the film from one edge
+  if (u_leak > 0.001) {
+    float a = u_leakPos * 6.2831853;
+    float along = dot(uv - 0.5, vec2(cos(a), sin(a))) + 0.5;
+    float wob = vnoise(vec2(along * 3.0, t * u_leakSpeed)) - 0.5;
+    float m = smoothstep(1.0 - u_leakSize, 1.15, along + wob * 0.3);
+    col = 1.0 - (1.0 - col) * (1.0 - u_leakColor * m * u_leak);
+  }
+  return col;
+}
 
 // one scanline of the signal, decoded to the light the beam puts out. Interlaced, the field just
 // scanned glows brighter than the one fading from the frame before (gains average to 1), so detail
@@ -250,14 +350,36 @@ uniform vec2 uExpRes;       // export size in pixels: the camera's frame of refe
 uniform float uPitchS;      // photosite pitch in export pixels
 uniform float uCamAngle;    // sensor rotation in degrees: Angle plus Drift's wobble
 uniform float uCamStripe;   // sub-stripe width of the grid the camera sees, in export pixels
+uniform vec2 uCamShift;     // where the hand has moved the camera, in export pixels
+uniform vec2 uCamTilt;      // the camera turned off square to the glass, which fans the fringes out
+uniform float uCamRoll;     // rolling shutter: a tremble in the hand shears the rows, in export pixels
+// Nothing real is perfectly flat: the glass and the lens both ripple a little. A fraction of a pixel
+// here moves a fringe by a whole fringe, because moiré magnifies it, so this is what stops the
+// fringes reading as ruled lines.
+vec2 warpAt(vec2 n) {
+  float s = mix(0.6, 5.0, u_moireWarpScale), t = uTime * 0.13;
+  vec2 q = n * s;
+  return (vec2(vnoise(q + vec2(t, 3.7)) + 0.5 * vnoise(q * 2.3 - t + 9.1),
+               vnoise(q + vec2(7.3, -t)) + 0.5 * vnoise(q * 2.3 + t + 1.7)) - 0.75) * uCamStripe * 6.0 * u_moireWarp;
+}
 vec2 sensorToExp(vec2 s) {
   vec2 q = rot(-radians(uCamAngle)) * s * uPitchS;
   vec2 n = q / uExpRes.y;
-  return uExpRes * 0.5 + q * (1.0 + u_moireRings * 0.25 * dot(n, n));
+  q *= 1.0 + u_moireRings * 0.25 * dot(n, n);
+  q /= 1.0 + dot(n, uCamTilt);
+  n = q / uExpRes.y;
+  q += warpAt(n);
+  q.x += uCamRoll * sin(n.y * 5.0 + uTime * 7.0);
+  return uExpRes * 0.5 + q + uCamShift;
 }
 vec2 expToSensor(vec2 e) {
-  vec2 q = e - uExpRes * 0.5;
+  vec2 q = e - uExpRes * 0.5 - uCamShift;
   vec2 n = q / uExpRes.y;
+  q.x -= uCamRoll * sin(n.y * 5.0 + uTime * 7.0);
+  q -= warpAt(n);
+  n = q / uExpRes.y;
+  q /= 1.0 - dot(n, uCamTilt);
+  n = q / uExpRes.y;
   q /= 1.0 + u_moireRings * 0.25 * dot(n, n);   // inverse of the lens, close enough for small bends
   return rot(radians(uCamAngle)) * q / uPitchS;
 }
@@ -268,10 +390,12 @@ float bayerPlane(vec2 x, vec2 o, int ch) {
   ivec2 s = ivec2(b * 2.0 + o);
   return mix(mix(site(s)[ch], site(s + ivec2(2, 0))[ch], f.x), mix(site(s + ivec2(0, 2))[ch], site(s + ivec2(2, 2))[ch], f.x), f.y);
 }
-// the developed photo at an output pixel, sampled with mipmaps so smaller views stay smooth
-vec3 cameraView(vec2 fc) {
-  vec2 s = expToSensor(fc * uExpRes / uOut);
-  return texture(uCamera, (s + uSensorRes * 0.5) / uSensorRes).rgb;
+// the developed photo at an output pixel, sampled with mipmaps so smaller views stay smooth. Defocus
+// softens it, and the fringes' contrast is measured against the photo's wide average.
+vec3 cameraView(vec2 fc, float defocus) {
+  vec2 st = (expToSensor(fc * uExpRes / uOut) + uSensorRes * 0.5) / uSensorRes;
+  vec3 mean = textureLod(uCamera, st, 7.0).rgb;
+  return max(mean + (texture(uCamera, st, defocus).rgb - mean) * u_moireContrast, 0.0);
 }
 // Moiré Grid: Pixel Grid, Aperture Grille, Slot Mask, Delta Dot, or the Screen's own mask
 int cameraGridType() {
@@ -351,7 +475,13 @@ void main() {
     lines += lineProfile(clamp(g / uExpRes, 0.0, 1.0), uExpRes.y);
   }
   const float SITE_APERTURE = 0.4;
-  o = vec4(cameraGrid(sensorToExp(s), uPitchS * SITE_APERTURE) * lines / 3.0, 1.0);
+  vec2 e = sensorToExp(s);
+  vec3 grid = cameraGrid(e, uPitchS * SITE_APERTURE);
+  // a real screen's structure runs both ways, so the fringes weave instead of ruling plain lines
+  if (u_moireWeave > 0.001) grid *= 1.0 + u_moireWeave * 0.7 * cos(6.2831853 * e.y / (3.0 * uCamStripe * 1.03));
+  // and the sensor records all this with a little noise of its own
+  if (u_moireNoise > 0.001) grid *= 1.0 + u_moireNoise * 0.5 * (hash12(gl_FragCoord.xy + uFrame * 3.1) - 0.5);
+  o = vec4(grid * lines / 3.0, 1.0);
 }
 #else
 void main() {
@@ -370,7 +500,9 @@ void main() {
   const float ROOM_LIGHT = 0.025;
   float cam = max(u_moire, u_rainbow);
   if (cam > 0.001) {
-    vec3 fringes = cameraView(gl_FragCoord.xy);
+    // Focus: a phone only holds part of a close-up screen sharp, and the fringes melt away elsewhere
+    float blurred = u_moireFocus * smoothstep(0.3, 0.72, vnoise(uv * vec2(uAspect, 1.0) * 1.4 + t * 0.09));
+    vec3 fringes = mix(vec3(lum(cameraView(gl_FragCoord.xy, 5.0))), cameraView(gl_FragCoord.xy, blurred * 3.0), 1.0 - blurred * 0.85);
     vec3 cells = mix(vec3(1.0), cameraCells(gl_FragCoord.xy), u_moireCells) * lineProfile(suv, uOut.y);
     vec3 seen = (beamLight(F, true) + vec3(ROOM_LIGHT * u_moireCover)) * fringes * cells * inside + glowL;
     col = mix(col, gamutOf(seen), cam);
@@ -414,7 +546,7 @@ void main() {
   float l = lum(col);
   col += (shC - 0.5) * u_shAmt * 0.5 * (1.0 - smoothstep(0.0, 0.6, l));
   col += (hiC - 0.5) * u_hiAmt * 0.5 * smoothstep(0.4, 1.0, l);
-  if (u_gmap > 0.001) col = mix(col, mix(shC * 0.12, mix(hiC, vec3(1.0), 0.3), smoothstep(0.0, 1.0, l)), u_gmap);
+  if (u_gmap > 0.001) col = mix(col, gradientMap(smoothstep(0.0, 1.0, l), shC, hiC), u_gmap);
   if (u_cross > 0.001) col = mix(col, vec3(smoothstep(0.05, 0.95, col.r), col.g * 0.9 + 0.05, col.b * 0.7 + 0.15), u_cross);
   col = max(col, 0.0);
   col = u_lift >= 0.0 ? col * (1.0 - u_lift) + u_lift : max(col + u_lift, 0.0) / (1.0 + u_lift);
@@ -432,6 +564,8 @@ void main() {
     g = mix(g, g * vec3(0.88, 0.8, 0.6) * 1.6, dirt * 0.5);
     col = mix(col, (g - 0.5) * 1.15 + 0.47, u_grunge);
   }
+
+  col = colorFx(col, uv, suv, t);
 
   // monochrome tubes: one phosphor, whose hottest cores burn toward white
   int tint = int(u_tint + 0.5);
@@ -456,16 +590,26 @@ void main() {
     col *= 1.0 + u_filmVar * 0.07 * (hash11(uFrame * 1.7) - 0.5);
   }
   if (u_dust > 0.001) {
-    vec2 dq = uv * vec2(uAspect, 1.0) * 36.0;
-    vec2 cell = floor(dq);
-    if (hash12(cell + uFrame * 17.1) < u_dust * 0.025) {
-      // an irregular fleck for one frame: dark dirt on the print, or light through a hole in the emulsion
-      vec2 p = fract(dq) - vec2(hash12(cell + 1.3), hash12(cell + 2.7));
-      float lobes = 2.0 + floor(hash12(cell + 7.0) * 4.0);
-      float rough = 1.0 + 0.35 * sin(atan(p.y, p.x) * lobes + hash12(cell + 8.0) * 6.283);
-      float d = length(p * vec2(1.0, 0.6 + 0.8 * hash12(cell + 3.1))) * rough;
-      float r = 0.05 + 0.2 * hash12(cell + 5.0);
-      col = mix(col, vec3(hash12(cell + 9.0) > 0.5 ? 0.02 : 0.95), (1.0 - smoothstep(r * 0.5, r, d)) * 0.85 * u_dustOpacity);
+    // Three sizes of speck, from fine grit to the odd big fleck, most of them bright as they are on a
+    // scan. Each is a soft ellipse whose edge wanders with noise, sized against the output pixel, so a
+    // speck too small to resolve fades out rather than landing as one hard square.
+    float held = floor(uFrame / (1.0 + floor(u_dustHold * 11.0)));
+    float px = 1.0 / uOut.y;
+    for (int i = 0; i < 3; i++) {
+      float fi = float(i), scale = (i == 0 ? 150.0 : i == 1 ? 62.0 : 22.0) / mix(0.6, 2.2, u_dustSize);
+      vec2 dq = uv * vec2(uAspect, 1.0) * scale, cell = floor(dq);
+      vec2 id = cell + fi * 41.0 + held * 17.1;
+      if (hash12(id) < u_dust * (i == 0 ? 0.05 : i == 1 ? 0.03 : 0.012)) {
+        vec2 c = 0.3 + 0.4 * vec2(hash12(id + 1.3), hash12(id + 2.7));
+        vec2 q = rot(hash12(id + 4.1) * 3.1416) * (fract(dq) - c);
+        q.y *= 1.0 + 2.2 * hash12(id + 3.1);
+        float r = 0.05 + 0.15 * pow(hash12(id + 5.0), 2.0);
+        float d = length(q) * (1.0 + 0.9 * (vnoise(q * 34.0 + id) - 0.5));
+        float aa = max(px * scale * (0.9 + u_dustSoft * 3.0), r * (0.2 + 0.6 * u_dustSoft));
+        float m = (1.0 - smoothstep(r - aa, r + aa, d)) * min(1.0, r / aa + 0.15);
+        vec3 ink = hash12(id + 9.0) < 0.75 ? vec3(0.96, 0.95, 0.92) : vec3(0.015);
+        col = mix(col, ink, m * (0.55 + 0.45 * hash12(id + 6.0)) * u_dustOpacity);
+      }
     }
   }
   if (u_scratch > 0.001) {

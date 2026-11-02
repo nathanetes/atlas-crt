@@ -3,7 +3,7 @@
 (function () {
   const K = window.Atlas;
   if (!K || !K.engine) return;
-  const { MASTER, MACROS, GROUPS, DEFAULTS, BY_KEY, PRESETS, CATS } = window.AtlasParams;
+  const { MASTER, MACROS, GROUPS, DEFAULTS, BY_KEY, PRESETS, CATS, MOIRE_MOTION } = window.AtlasParams;
   const Auto = window.AtlasAuto;
   const $ = (id) => document.getElementById(id);
   const { state, store, toast, el, icon, ui } = K;
@@ -34,15 +34,93 @@
   };
   const fromShare = (c, x) => c.min + (c.max - c.min) * Math.pow(x, c.pow);
 
+  // Each control can open a dropdown beneath it: the detail controls that belong to it, then its
+  // motion micro-controls. The motion part is built when first opened, as most never are.
+  function subsOf(r) {
+    if (r.subs) return r.subs;
+    r.subs = el('div', 'micro');
+    r.subs.hidden = true;
+    r.details = el('div', 'ctls');
+    r.subs.append(r.details);
+    r.box.append(r.subs);
+    return r.subs;
+  }
+  function toggleSubs(r, open = r.subs ? r.subs.hidden : true) {
+    subsOf(r).hidden = !open;
+    r.more.setAttribute('aria-expanded', String(open));
+    if (open && !r.motion && !r.c.opts && !r.c.color) buildMotion(r);
+  }
+  function buildMotion(r) {
+    const k = r.c.k;
+    const box = (r.motion = el('div', 'micro-motion'));
+    box.append(el('p', 'micro-title', 'Motion'));
+    const read = (prop) => (state.micro[k] ? state.micro[k][prop] : Auto.MICRO[prop]);
+    const paints = [];
+    const line = (label, prop, min, max, step, fmt, tip) => {
+      const row = el('div', 'ctl plain');
+      const name = el('label', '', label);
+      name.title = tip;
+      const input = el('input');
+      input.type = 'range'; input.min = min; input.max = max; input.step = step;
+      input.setAttribute('aria-label', r.c.l + ' ' + label);
+      const out = el('output');
+      const paint = () => {
+        input.value = read(prop);
+        input.style.setProperty('--pct', ((read(prop) - min) / (max - min)) * 100 + '%');
+        out.textContent = fmt(read(prop));
+      };
+      input.oninput = () => {
+        if (!state.micro[k]) state.micro[k] = { ...Auto.MICRO };
+        state.micro[k][prop] = +input.value;
+        if (!Auto.microOn(state.micro[k])) { delete state.micro[k]; delete K.live[k]; }
+        paint();
+        paintRow(k);
+        K.changed(r.c.l + ': motion');
+      };
+      input.ondblclick = () => { input.value = Auto.MICRO[prop]; input.oninput(); };
+      paint();
+      paints.push(paint);
+      row.append(name, input, out);
+      box.append(row);
+    };
+    const pc = (v) => Math.round(v * 100) + '%', hz = (v) => (v < 1 ? v.toFixed(2) : v.toFixed(1)) + ' Hz';
+    line('Stutter', 'stutter', 0, 1, 0.01, pc, 'Jumps between random values');
+    line('Stutter Rate', 'stutterRate', 0.5, 30, 0.1, hz, 'How many jumps a second');
+    line('Jitter', 'jitter', 0, 1, 0.01, pc, 'Shakes the value every frame');
+    line('Spikes', 'spike', 0, 1, 0.01, pc, 'Throws the value hard for a moment');
+    line('Spike Rate', 'spikeRate', 0.2, 12, 0.1, hz, 'How often a spike can land');
+    line('Drift', 'drift', 0, 1, 0.01, pc, 'Lets the value wander');
+    line('Drift Rate', 'driftRate', 0.02, 4, 0.01, hz, 'How fast it wanders');
+    r.repaintMotion = () => paints.forEach((p) => p());
+    r.subs.append(box);
+  }
+
   function buildControl(c, parent, group) {
     const row = el('div', 'ctl');
+    const box = el('div', 'ctl-box');
+    box.append(row);
     const id = 'c_' + c.k;
     const label = el('label', '', c.l);
     label.htmlFor = id;
     label.title = c.u && c.u.length >= 4 ? c.u + ' · double-click to reset' : 'Double-click to reset';
-    const r = { c, row, home: parent, search: (c.l + ' ' + (group || '')).toLowerCase(), sliding: false, dragKey: null };
-    row.append(label);
-    if (c.opts) {
+    const under = c.of && rows.get(c.of);
+    if (under) { subsOf(under); parent = under.details; }
+    const more = el('button', 'ctl-more');
+    more.type = 'button';
+    more.append(icon('i-chevron'));
+    more.setAttribute('aria-expanded', 'false');
+    more.setAttribute('aria-label', 'More for ' + c.l);
+    more.title = 'Details and motion';
+    const r = { c, row, box, more, home: parent, search: (c.l + ' ' + (group || '')).toLowerCase(), sliding: false, dragKey: null };
+    more.onclick = () => toggleSubs(r);
+    row.append(more, label);
+    if (c.color) {
+      row.classList.add('is-select');
+      const input = (r.input = el('input', 'color-well'));
+      input.type = 'color';
+      input.oninput = () => setParam(c.k, parseInt(input.value.slice(1), 16));
+      row.append(input);
+    } else if (c.opts) {
       row.classList.add('is-select');
       const input = (r.input = el('select', 'select'));
       c.opts.forEach((o) => { const op = el('option', '', o.l); op.value = String(o.v); input.append(op); });
@@ -76,7 +154,7 @@
     }
     r.input.id = id;
     label.ondblclick = () => setParam(c.k, DEFAULTS[c.k]);
-    parent.append(row);
+    parent.append(box);
     rows.set(c.k, r);
   }
 
@@ -108,7 +186,7 @@
   // what the slider shows: the value at the playhead for keyframes, the centre for an LFO
   function shownValue(k) {
     const a = state.auto[k], c = BY_KEY[k];
-    if (!a || c.opts || a.off || a.mode === 'lfo') return state.params[k];
+    if (!a || c.opts || c.color || a.off || a.mode === 'lfo') return state.params[k];
     return Auto.valueOf(a, state.params[k], c, K.timeNow());
   }
 
@@ -117,6 +195,9 @@
     if (!r) return;
     paintValue(r, r.sliding ? state.params[k] : shownValue(k));
     r.row.classList.toggle('changed', Math.abs(state.params[k] - DEFAULTS[k]) > 1e-6);
+    r.row.classList.toggle('moving', Auto.microOn(state.micro[k]));
+    if (r.repaintMotion) r.repaintMotion();
+    r.more.hidden = !!(r.c.opts || r.c.color) && !r.subs;
     if (!r.modBtn) return;
     const a = state.auto[k], mode = a ? a.mode : '';
     r.row.dataset.auto = mode;
@@ -126,6 +207,7 @@
     r.mark.hidden = mode !== 'lfo' || a.off;
   }
   function paintValue(r, v) {
+    if (r.c.color) { r.input.value = '#' + Math.round(v).toString(16).padStart(6, '0'); return; }
     if (r.c.opts) { r.input.value = String(v); return; }
     r.input.value = r.c.pow ? share(r.c, v) : v;
     r.input.style.setProperty('--pct', share(r.c, v) * 100 + '%');
@@ -133,7 +215,9 @@
   }
 
   function setParam(k, v) {
+    const quiet = state.params.rainbow <= 0.001 && state.params.moire <= 0.001;
     state.params[k] = v;
+    if ((k === 'rainbow' || k === 'moire') && quiet && v > 0.001) startMoireMotion();
     const r = rows.get(k), a = state.auto[k];
     if (a && a.mode === 'keys' && r.modBtn) {
       const key = r.dragKey || upsertKey(k, v);
@@ -148,6 +232,16 @@
     if (state.look) { state.look = null; paintLooks(); }
     paintModules();
     K.changed(BY_KEY[k].l);
+  }
+
+  // moiré starts moving as soon as it's raised, on any of these you haven't already automated
+  function startMoireMotion() {
+    for (const k in MOIRE_MOTION) {
+      if (state.auto[k]) continue;
+      state.auto[k] = Auto.normalize(MOIRE_MOTION[k]);
+      paintRow(k);
+    }
+    K.emit('auto');
   }
 
   // ------------------------------------------------------------ automation data
@@ -555,8 +649,8 @@
       m.hideByUser = ui.modHidden.includes(id);
       m.d.hidden = m.hideByUser;
     });
-    rows.forEach((r, k) => { if (!ui.pinned.includes(k)) r.home.append(r.row); });
-    ui.pinned.forEach((k) => { const r = rows.get(k); if (r) $('pinned').append(r.row); });
+    rows.forEach((r, k) => { if (!ui.pinned.includes(k)) r.home.append(r.box); });
+    ui.pinned.forEach((k) => { const r = rows.get(k); if (r) $('pinned').append(r.box); });
     $('pinnedSec').hidden = !ui.pinned.length;
   };
   function togglePin(k) {
@@ -575,16 +669,23 @@
     rows.forEach((r) => {
       if (r.home === quickRows) return;
       const hit = !q || r.search.includes(q);
-      r.row.hidden = !hit;
+      r.box.hidden = !hit;
       if (hit) total++;
     });
+    // a match inside a dropdown shows its parent, open
+    rows.forEach((r) => {
+      if (!r.c.of) return;
+      const up = rows.get(r.c.of);
+      if (q && !r.box.hidden) { up.box.hidden = false; subsOf(up).hidden = false; }
+      else if (!q && up.subs) up.subs.hidden = up.more.getAttribute('aria-expanded') !== 'true';
+    });
     for (const m of mods.values()) {
-      const hits = m.g.controls.some((c) => !rows.get(c.k).row.hidden && !ui.pinned.includes(c.k));
+      const hits = m.g.controls.some((c) => !rows.get(c.k).box.hidden && !ui.pinned.includes(c.k));
       m.d.hidden = m.hideByUser || (q && !hits);
       m.d.open = q ? hits : openBefore.includes(m);
       m.d.querySelector('.hint').hidden = !!q;
     }
-    $('masterSec').hidden = !!q && !MASTER.slice(1).some((c) => !rows.get(c.k).row.hidden);
+    $('masterSec').hidden = !!q && !MASTER.slice(1).some((c) => !rows.get(c.k).box.hidden);
     $('searchNone').hidden = !q || total > 0;
   });
 
@@ -594,6 +695,21 @@
     store('atlas.quality', q);
   }, 'sm');
   $('outSize').onchange = (e) => { K.setOut(e.target.value); store('atlas.out', e.target.value); };
+  // the picture's shape: everything downstream, the preview included, follows it
+  const setFit = K.segmented($('fitSeg'), [['fill', 'Crop'], ['fit', 'Bars']], state.fit, (v) => {
+    K.setRatio(state.ratio, v);
+    store('atlas.fit', v);
+  }, 'sm');
+  K.paintRatio = () => {
+    $('ratioSel').value = String(state.ratio);
+    $('fitRow').hidden = !state.ratio;
+    setFit(state.fit);
+  };
+  $('ratioSel').onchange = (e) => {
+    K.setRatio(+e.target.value, state.fit);
+    store('atlas.ratio', +e.target.value);
+    K.paintRatio();
+  };
 
   // ------------------------------------------------------------ saved looks
   // Looks live in this browser's storage, which belongs to one exact web address: move the site to
@@ -639,9 +755,14 @@
   function keyframed(auto) {
     const out = {};
     for (const k in auto || {}) {
-      const a = BY_KEY[k] && !BY_KEY[k].opts ? Auto.normalize(auto[k]) : null;
+      const a = BY_KEY[k] && !BY_KEY[k].opts && !BY_KEY[k].color ? Auto.normalize(auto[k]) : null;
       if (a) out[k] = a;
     }
+    return out;
+  }
+  function microsOf(micro) {
+    const out = {};
+    for (const k in micro || {}) if (BY_KEY[k] && Auto.microOn(micro[k])) out[k] = Auto.cleanMicro(micro[k]);
     return out;
   }
   const lookFile = (list) => new Blob([JSON.stringify({ app: 'atlas-crt', type: 'looks', version: 1, exported: new Date().toISOString(), looks: list }, null, 2)], { type: 'application/json' });
@@ -653,7 +774,7 @@
     for (const k in raw.p) if (k in DEFAULTS && Number.isFinite(raw.p[k])) p[k] = raw.p[k];
     const enabled = {};
     GROUPS.forEach((g) => { enabled[g.id] = !(raw.enabled && raw.enabled[g.id] === false); });
-    const look = { name: raw.name.trim().slice(0, 40) || 'Imported look', p, enabled, auto: keyframed(raw.auto) };
+    const look = { name: raw.name.trim().slice(0, 40) || 'Imported look', p, enabled, auto: keyframed(raw.auto), micro: microsOf(raw.micro) };
     if (Number.isFinite(raw.length) && raw.length > 0) look.length = raw.length;
     return look;
   }
@@ -698,6 +819,7 @@
     state.params = { ...DEFAULTS, ...look.p };
     state.enabled = Object.fromEntries(GROUPS.map((g) => [g.id, look.enabled ? look.enabled[g.id] !== false : true]));
     state.auto = keyframed(look.auto);
+    state.micro = microsOf(look.micro);
     if (look.length) state.length = look.length;
     K.live = {};
     state.look = look.name;
@@ -712,6 +834,7 @@
     state.params = { ...DEFAULTS, ...s.params };
     state.enabled = s.enabled;
     state.auto = keyframed(s.auto);
+    state.micro = microsOf(s.micro);
     state.look = s.look;
     state.length = s.length;
     K.live = {};
@@ -771,7 +894,7 @@
     const name = $('presetName').value.trim();
     if (!name) { $('presetName').focus(); toast('Type a name for the look first.'); return; }
     const list = mine().filter((m) => m.name !== name);
-    list.push({ name, p: { ...state.params }, enabled: { ...state.enabled }, auto: JSON.parse(JSON.stringify(state.auto)), length: state.length });
+    list.push({ name, p: { ...state.params }, enabled: { ...state.enabled }, auto: JSON.parse(JSON.stringify(state.auto)), micro: JSON.parse(JSON.stringify(state.micro)), length: state.length });
     saveMine(list);
     if (!mine().some((m) => m.name === name)) { toast('This browser blocked saving, so looks cannot be kept here.'); return; }
     $('presetName').value = '';
@@ -789,12 +912,12 @@
     const p = { ...DEFAULTS };
     GROUPS.forEach((g) => g.controls.forEach((c) => {
       if (c.opts) { if (Math.random() < 0.2) p[c.k] = c.opts[Math.floor(Math.random() * c.opts.length)].v; return; }
-      if (c.tape || (c.n !== undefined && Math.random() > 0.25)) return;
+      if (c.tape || c.color || (c.n !== undefined && Math.random() > 0.25)) return;
       const span = c.max - c.min;
       const v = c.n !== undefined ? c.min + span * Math.pow(Math.random(), 1.8) : c.min + span * Math.random();
       p[c.k] = Math.round(v / c.step) * c.step;
     }));
-    ['capture', 'invert', 'solar', 'mosh', 'vhs'].forEach((k) => { if (Math.random() > 0.2) p[k] = DEFAULTS[k]; });
+    ['capture', 'invert', 'solar', 'mosh', 'vhs', 'thr', 'ht', 'warp', 'g1Amt', 'g2Amt', 'g3Amt', 'g4Amt'].forEach((k) => { if (Math.random() > 0.2) p[k] = DEFAULTS[k]; });
     p.tint = 0;
     applyLook({ name: null, p });
   };
@@ -804,7 +927,7 @@
   function persist() {
     clearTimeout(persist.t);
     persist.t = setTimeout(() => store('atlas.session.v3', {
-      params: state.params, enabled: state.enabled, look: state.look, auto: state.auto, length: state.length,
+      params: state.params, enabled: state.enabled, look: state.look, auto: state.auto, micro: state.micro, length: state.length,
     }), 300);
   }
   const saved = store('atlas.session.v3');
@@ -812,6 +935,7 @@
     state.params = { ...DEFAULTS, ...saved.params };
     Object.assign(state.enabled, saved.enabled || {});
     state.auto = keyframed(saved.auto);
+    state.micro = microsOf(saved.micro);
     state.look = saved.look || null;
     if (saved.length) state.length = saved.length;
   } else {
@@ -819,11 +943,14 @@
   }
   // open the looks tab on the active look's category
   const cur = PRESETS.find((p) => p.name === state.look);
-  if (cur) cat = cur.cat;
+  if (cur && cur.name !== 'Init') cat = cur.cat;
   const q = store('atlas.quality');
   if (q) { setQuality(q); K.setQuality(q); }
   const o = store('atlas.out');
   if (o) { $('outSize').value = o; K.setOut(o); }
+  const savedRatio = store('atlas.ratio');
+  if (savedRatio) K.setRatio(savedRatio, store('atlas.fit') || 'fill');
+  K.paintRatio();
   const pane = store('atlas.pane') === 'adjust' ? 'adjust' : 'looks';
   setPane(pane);
   showPane(pane);

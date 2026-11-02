@@ -1,5 +1,43 @@
 # Changelog
 
+## v3.2.0-beta
+
+Atlas grows from a CRT emulator into a creative tool: custom glitches, big color moves, a rebuilt moiré camera, details under every control, and a frame-accurate Pro export.
+
+Try it at https://atlas-crt.nathanetes.com
+
+### Added
+
+- **Glitch 1 to 4.** Four independent slots. Choose the type (Slice Shift, Block Shift, Line Hold, Mosaic, Pixel Sort, Sparkle Dashes, Streaks, RGB Tear, Freeze, Invert), how often, how long, how likely, where, how big, which direction, how it moves, how stepped its edges are, what color, and how that color blends. Every setting can take keyframes or an LFO.
+- **Creative looks,** now the first tab: Stipple, Stipple Red, Screen Print, Acid Print, Red Room, Oil Slick, Expired Film, Burnt CRT, Data Rot, Slice Cinema, Sparkle Static and Liquid Dream. Each is a fast start, and every part stays adjustable.
+- **Stipple & Print:** turn the picture into two colors of your choice, from grainy stipple to a clean screen print, with paper texture and halftone dots. Detail keeps features visible however the photo was lit.
+- **Color FX:** Burn, oil-slick Iridescence, Hue Cycle, Hue by Brightness, Hue Across Picture and Light Leak. Gradient Map gains six palettes and your own three colors, and there's a full Channel Mixer.
+- **Warp:** bend the whole picture eight ways, from flowing liquid to mirror folds, with Scale, Speed, Turbulence and Stutter.
+- **Details under every control.** The arrow beside a control opens the settings that belong to it, so modules open simple and go as deep as you want. Search finds them too.
+- **Motion on every control.** Each numeric control's dropdown adds Stutter, Jitter, Spikes and Drift, so anything can misbehave on its own.
+- **Pro export.** Renders every frame in full instead of recording in real time, so nothing drops, and it's usually faster than real time. Choose the format (H.264 or HEVC), frame rate, size, aspect ratio, crop or black bars, quality, color (Rec. 709 or Display P3), and for videos, sound on or muted, sample rate and bitrate.
+- **Aspect Ratio** under Render, from 21:9 to 9:16, cropped or with bars, and the preview matches. Output adds 4K.
+
+### Changed
+
+- **Moiré is rebuilt to behave like a camera.** It used to read as a clean stripe overlay that flattened the picture. Fringes now fade with focus, ripple with the glass, weave in two directions and carry sensor noise, and the picture survives underneath. A handheld camera sways through them, and new Pan and Tilt controls fan them out. Rainbow Streaks keeps the bold look.
+- **Moiré moves by default.** Raising Rainbow Moiré or Moiré Bands starts random LFOs on Moiré Angle, Tube Curvature, Camera Position and Moiré Rings, and the camera looks all use them.
+- **Dust looks like dust.** The hard stars, crosses and diamonds are gone. Specks are now soft, organic flecks in three sizes, with Size, Softness and Hold controls.
+- **Head-Switch Band and Top-Line Spectral now do something.** They were too thin to see, and partly hidden by overscan. Both are real bands now, with height, shift, noise and speed controls.
+- **Tear** is sharper and more jagged, with Height and Speed.
+- **Liquid glass** on the export window, popovers and notices, and more room around the panels. The export window now floats over the whole app.
+
+### Fixed
+
+- **Moiré no longer rebuilds its camera every frame.** An LFO on Moiré Angle was reallocating GPU memory constantly, which hurt playback.
+
+### Known limitations
+
+- **Saved looks that use moiré will look softer,** because the camera changed. Raise Fringe Contrast to bring the strength back.
+- **Pro export writes MP4 only.** ProRes needs an encoder browsers don't have, and WebM stays in Quick.
+- **Pro needs WebCodecs,** which current Chrome, Edge and Safari have. HEVC and AAC sound depend on the browser and device, and Atlas says so if one isn't available.
+- **Display P3 is untested on a wide-gamut screen,** so check a clip before relying on it.
+
 ## v3.1.0-beta
 
 Real VHS, from the real thing: ntsc-rs now runs inside Atlas. And the interface moves closer to a native Apple app.

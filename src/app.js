@@ -21,6 +21,7 @@
   K.engine = engine;
   engine.tape.onfail = () => toast('The VHS tape stage could not start in this browser.');
   engine.onraster = () => updateBadge();
+  engine.colorKeys = Object.values(BY_KEY).filter((c) => c.color).map((c) => c.k);
 
   const state = (K.state = {
     params: { ...DEFAULTS },
@@ -32,7 +33,10 @@
     compare: false,
     playing: true,
     auto: {}, // key -> { mode: 'keys' or 'lfo', off, keys, lfo }, see automation.js
+    micro: {}, // key -> stutter, jitter, spike and drift settings, see automation.js
     length: 10, // seconds of timeline for photos and the test card
+    ratio: 0,   // picture shape, width over height; 0 keeps the source's
+    fit: 'fill',
   });
   let clock = 0, frame = 0, last = performance.now();
 
@@ -143,8 +147,12 @@
     const t = K.timeNow();
     for (const k in state.auto) {
       const a = state.auto[k], c = BY_KEY[k];
-      if (!c || c.opts || a.off) { delete K.live[k]; continue; }
+      if (!c || c.opts || c.color || a.off) { delete K.live[k]; continue; }
       p[k] = K.live[k] = Auto.valueOf(a, p[k], c, t);
+    }
+    for (const k in state.micro) {
+      const c = BY_KEY[k];
+      if (c && Auto.microOn(state.micro[k])) p[k] = K.live[k] = Auto.microAt(state.micro[k], p[k], c, t);
     }
     for (const m of MACROS) {
       const f = p[m.k];
@@ -210,7 +218,7 @@
   function releaseSource() {
     if (src.kind === 'video') { src.el.pause(); src.el.removeAttribute('src'); src.el.load(); }
     if (src.url) URL.revokeObjectURL(src.url);
-    src.url = null; src.audio = null;
+    src.url = null; src.audio = null; src.file = null;
   }
 
   function useSource(kind, el, w, h, name) {
@@ -256,6 +264,7 @@
     v.onloadedmetadata = () => {
       releaseSource();
       src.url = url;
+      src.file = file;
       src.audio = audioFor(v);
       useSource('video', v, v.videoWidth, v.videoHeight, baseName(file.name));
       v.play().catch(() => { state.playing = false; syncTransport(); });
@@ -311,12 +320,14 @@
   // ------------------------------------------------------------ output + raster
   function applyOutput() {
     if (!src.w) return;
-    const aspect = src.w / src.h;
+    const aspect = state.ratio || src.w / src.h;
     let w, h;
     if (state.out === 'source') {
       const cap = Math.min(4096, engine.maxTex);
-      const s = Math.min(1, cap / Math.max(src.w, src.h));
-      w = src.w * s; h = src.h * s;
+      // the source's long side, in the shape the picture now has
+      const long = Math.min(cap, Math.max(src.w, src.h));
+      w = aspect >= 1 ? long : long * aspect;
+      h = aspect >= 1 ? long / aspect : long;
     } else {
       const short = +state.out;
       if (aspect >= 1) { h = short; w = short * aspect; } else { w = short; h = short / aspect; }
@@ -336,6 +347,12 @@
 
   K.setQuality = (q) => { state.quality = q; engine.setQuality(q); updateBadge(); };
   K.setOut = (o) => { state.out = o; applyOutput(); };
+  K.setRatio = (ratio, fit) => {
+    state.ratio = ratio;
+    state.fit = fit;
+    engine.setFrame(ratio, fit === 'fill');
+    applyOutput();
+  };
 
   // ------------------------------------------------------------ render loop
   K.clockNow = () => clock;
@@ -345,6 +362,7 @@
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     if (!src.el) return;
+    if (K.offline) return; // an export is rendering frame by frame, at its own pace
     const running = state.playing || K.recording;
     if (running) {
       clock += dt; frame++;
@@ -352,7 +370,7 @@
     }
     if (src.kind === 'sample' && running) src.el.draw(clock);
     const split = state.compare && !K.recording ? state.split : -1;
-    engine.render(K.effective(), clock, frame, { uSplit: split });
+    engine.render(K.effective(), clock, frame, { uSplit: split, uTl: K.timeNow() });
     K.hooks.forEach((fn) => fn(now));
     updateTime();
   }

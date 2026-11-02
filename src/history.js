@@ -10,7 +10,7 @@
 
   let steps = [], at = -1, label = '', timer = 0, down = false;
 
-  const snap = () => JSON.stringify({ params: state.params, enabled: state.enabled, auto: state.auto, look: state.look, length: state.length });
+  const snap = () => JSON.stringify({ params: state.params, enabled: state.enabled, auto: state.auto, micro: state.micro, look: state.look, length: state.length });
 
   function settle() {
     clearTimeout(timer);

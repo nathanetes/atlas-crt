@@ -125,7 +125,7 @@
   }
 
   function sync() {
-    const ks = Object.keys(state.auto).filter((k) => BY_KEY[k] && !BY_KEY[k].opts);
+    const ks = Object.keys(state.auto).filter((k) => BY_KEY[k] && !BY_KEY[k].opts && !BY_KEY[k].color);
     for (const [k, L] of lanes) if (!ks.includes(k)) { L.root.remove(); lanes.delete(k); }
     ks.forEach((k, i) => {
       let L = lanes.get(k);
@@ -588,7 +588,7 @@
   const PICK_GROUPS = [
     { id: 'quick', title: 'Quick', controls: [...MASTER, ...MACROS] },
     ...GROUPS,
-  ].map((g) => ({ id: g.id, title: g.title, controls: g.controls.filter((c) => !c.opts) }));
+  ].map((g) => ({ id: g.id, title: g.title, controls: g.controls.filter((c) => !c.opts && !c.color) }));
   let pickCat = PICK_GROUPS[1].id;
   function paintPicker() {
     const q = $('pickSearch').value.trim().toLowerCase();
