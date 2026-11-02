@@ -87,11 +87,11 @@ uniform sampler2D uPrev;
 uniform vec2 uRes, uSrcRes;
 uniform float uTime, uFrame, uSrcAspect, uField;
 uniform float u_gain, u_chroma, u_hueDrift, u_bleed, u_rgbSplit, u_sharpen, u_lumaBW;
-uniform float u_bend, u_bendMotion, u_bendFreq, u_bendQ, u_bendBoost, u_bendLo, u_bendHi, u_bendFb, u_bendDelay;
+uniform float u_bend, u_bendDir, u_bendMotion, u_bendFreq, u_bendQ, u_bendBoost, u_bendLo, u_bendHi, u_bendFb, u_bendDelay;
 uniform float u_shake, u_tear, u_roll, u_flash, u_dropout, u_dropStyle, u_hum, u_echo, u_headSwitch, u_topLine;
 uniform float u_rf, u_speckSize, u_speckOpacity, u_grain;
 uniform float u_waves, u_waveCount, u_waveReact, u_waveSmooth, u_waveOrient, u_waveColor, u_waveDir, u_waveBlend;
-uniform float u_blockGlitch, u_slices, u_smear, u_smearThresh, u_compress;
+uniform float u_blockGlitch, u_slices, u_smear, u_smearDir, u_smearThresh, u_compress;
 uniform float u_persistence;
 
 vec3 src(vec2 uv) { return texture(uSrc, uv).rgb; }
@@ -190,11 +190,13 @@ void main() {
     rgb = mix(rgb, mix(avg, floor(rgb * lv + 0.5) / lv, 0.35), u_compress);
   }
   if (u_smear > 0.001) {
-    float len = u_smear * 0.3, bl = lum(rgb);
+    // the trail runs along Smear Direction: 0° to the right, 90° up
+    float dirA = radians(u_smearDir), bl = lum(rgb);
+    vec2 reach = u_smear * 0.3 * vec2(cos(dirA), sin(dirA) * uSrcAspect);
     vec3 best = rgb;
     for (int i = 1; i <= 24; i++) {
       float fi = float(i) / 24.0;
-      vec3 s = texture(uSrc, suv - vec2(fi * len, 0.0)).rgb;
+      vec3 s = texture(uSrc, suv - fi * reach).rgb;
       float ls = lum(s);
       if (ls > u_smearThresh && ls > bl) { best = s * (1.0 - fi * 0.35); bl = ls; }
     }
@@ -234,22 +236,24 @@ void main() {
     yiq.x += (yiq.x - yb) * u_sharpen * 2.5;
   }
 
-  // circuit bend: resonant ringing after edges, gated by level, folded back on overflow
+  // circuit bend: resonant ringing after edges, gated by level, folded back on overflow.
+  // The ringing runs along Direction (0° to the right, 90° up), one raster pixel and a half per tap.
   if (u_bend > 0.001) {
-    float px = 1.5 / uRes.x;
+    float dirA = radians(u_bendDir);
+    vec2 px = 1.5 * vec2(cos(dirA), sin(dirA)) / uRes;
     float omega = 6.2831853 * u_bendFreq / 5.5 * 0.45;
     float damp = 2.5 / max(u_bendQ, 0.25);
     float ph = t * u_bendMotion * 14.0;
     float prev = yiq.x, ring = 0.0;
     for (int i = 1; i <= 20; i++) {
       float fi = float(i);
-      float s = srcY(suv - vec2(fi * px, 0.0));
+      float s = srcY(suv - fi * px);
       ring += (prev - s) * exp(-fi * damp) * cos(fi * omega + ph);
       prev = s;
     }
     float ire = yiq.x * 100.0;
     float gate = smoothstep(u_bendLo - 6.0, u_bendLo + 6.0, ire) * (1.0 - smoothstep(u_bendHi - 6.0, u_bendHi + 6.0, ire));
-    float fb = srcY(suv - vec2(u_bendDelay * 0.019 + 0.002, 0.0));
+    float fb = srcY(suv - (u_bendDelay * 0.019 + 0.002) * vec2(cos(dirA), sin(dirA) * uSrcAspect));
     float bent = (ring * pow(10.0, u_bendBoost / 20.0) + u_bendFb * 6.0 * (fb - 0.5)) * gate;
     yiq.x += bent * u_bend;
     yiq.yz = rot(bent * u_bend * 5.0) * yiq.yz + vec2(0.6, -0.4) * bent * u_bend * 0.25;

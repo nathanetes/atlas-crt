@@ -19,6 +19,7 @@
     rate_limited: 'A save is already waiting for your answer.',
   };
 
+  K.saveFile = saveFile;
   async function saveFile(blob, filename) {
     const dl = await dlReady;
     if (dl) {
@@ -77,25 +78,37 @@
 
   function button(label, cls, fn) {
     const b = document.createElement('button');
-    b.type = 'button'; b.className = 'btn' + (cls ? ' ' + cls : ''); b.textContent = label;
+    b.type = 'button'; b.className = 'btn btn-sm ' + (cls || 'btn-secondary'); b.textContent = label;
     b.onclick = fn;
     return b;
   }
   function select(id, label, opts, val) {
     const wrap = document.createElement('label');
-    wrap.className = 'field-label';
-    wrap.style.display = 'flex'; wrap.style.alignItems = 'center'; wrap.style.gap = '6px';
+    wrap.className = 'rec-field';
     wrap.textContent = label;
     const s = document.createElement('select');
-    s.className = 'sel'; s.id = id;
+    s.className = 'select'; s.id = id;
     opts.forEach(([v, l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; s.append(o); });
     s.value = val;
     wrap.append(s);
     return wrap;
   }
 
+  // a clip's length comes from the file; a photo records the timeline, as long as you set it here
+  function lengthField() {
+    const wrap = document.createElement('label');
+    wrap.className = 'rec-field';
+    wrap.textContent = 'Length';
+    const n = document.createElement('input');
+    n.className = 'number'; n.id = 'recLen'; n.type = 'number'; n.min = 1; n.max = 600; n.step = 1;
+    n.value = state.length;
+    wrap.append(n, 's');
+    return wrap;
+  }
+
   function closePanel() {
     ui.box.hidden = true;
+    $('recLink').hidden = true;
     job = null;
     K.recording = false;
     if (src.kind === 'video') { src.el.loop = true; if (state.playing) src.el.play().catch(() => {}); }
@@ -114,25 +127,28 @@
     job = { mime, ext, phase: 'setup' };
     ui.box.hidden = false;
     ui.dot.className = 'rec-dot done';
-    ui.title.textContent = 'export · ' + ext;
+    ui.title.textContent = 'Export ' + ext.toUpperCase();
     ui.time.textContent = K.engine.expW + '×' + K.engine.expH;
     ui.bar.style.width = '0%';
     ui.note.textContent = src.kind === 'video'
       ? 'Plays the whole clip once in real time with the current look, sound included. Keep this tab in front while it records.'
-      : 'Records the picture for the length you pick, with the effects moving. Keep this tab in front while it records.';
+      : 'Records the timeline once, with the effects moving. Keep this tab in front while it records.';
     ui.actions.innerHTML = '';
-    ui.actions.append(select('recFps', 'fps', [['24', '24'], ['30', '30'], ['60', '60']], '30'));
-    if (src.kind !== 'video') {
-      ui.actions.append(select('recLen', 'length', [['5', '5 s'], ['10', '10 s'], ['15', '15 s'], ['30', '30 s']], '10'));
-    }
-    const spacer = document.createElement('span'); spacer.style.flex = '1';
-    ui.actions.append(spacer, button('$ cancel', '', closePanel), button('$ record', 'primary', start));
+    ui.actions.append(select('recFps', 'FPS', [['24', '24'], ['30', '30'], ['60', '60']], '30'));
+    if (src.kind !== 'video') ui.actions.append(lengthField());
+    const spacer = document.createElement('span'); spacer.className = 'grow';
+    ui.actions.append(spacer, button('Cancel', '', closePanel), button('Record', 'btn-primary', start));
   };
 
   async function start() {
     const fps = +$('recFps').value;
     const isVideo = src.kind === 'video';
-    const length = isVideo ? src.el.duration : +$('recLen').value;
+    if (!isVideo) {
+      state.length = Math.min(600, Math.max(1, +$('recLen').value || state.length));
+      K.changed('Timeline length');
+      K.emit('layout');
+    }
+    const length = K.timelineLength();
     if (!isFinite(length) || length <= 0) { toast('This clip has no readable length, so it cannot be exported.'); return; }
 
     K.recording = true;
@@ -154,9 +170,9 @@
     Object.assign(job, { phase: 'recording', rec, chunks, length, isVideo, started: 0, cancelled: false });
 
     ui.dot.className = 'rec-dot';
-    ui.title.textContent = 'recording · ' + job.ext;
+    ui.title.textContent = 'Recording';
     ui.actions.innerHTML = '';
-    ui.actions.append(button('$ cancel', '', () => { job.cancelled = true; stop(); }));
+    ui.actions.append(button('Cancel', '', () => { job.cancelled = true; stop(); }));
     K.syncTransport();
 
     if (isVideo) {
@@ -172,7 +188,7 @@
       rec.start(500);
       v.play().catch(() => { toast('The clip would not play, so recording stopped.'); job.cancelled = true; stop(); });
     } else {
-      K.seek(0); // keyframes play from the start of the timeline
+      K.seek(0); // keyframes and LFOs play from the start of the timeline
       rec.start(500);
     }
     job.started = performance.now();
@@ -199,16 +215,17 @@
     job.phase = 'done';
     const filename = src.name + '-atlas.' + job.ext;
     ui.dot.className = 'rec-dot done';
-    ui.title.textContent = 'ready · ' + job.ext;
+    ui.title.textContent = 'Ready';
     ui.time.textContent = mb(blob.size);
     ui.bar.style.width = '100%';
     ui.note.textContent = filename;
     ui.actions.innerHTML = '';
-    const spacer = document.createElement('span'); spacer.style.flex = '1';
+    const spacer = document.createElement('span'); spacer.className = 'grow';
+    $('recLink').hidden = false;
     ui.actions.append(
       spacer,
-      button('$ discard', '', closePanel),
-      button('$ save ' + job.ext, 'primary', async () => {
+      button('Discard', '', closePanel),
+      button('Save ' + job.ext.toUpperCase(), 'btn-primary', async () => {
         if (await saveFile(blob, filename)) closePanel();
       }),
     );

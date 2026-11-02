@@ -1,5 +1,43 @@
 # Changelog
 
+## v3.0.0-beta
+
+A new interface, in the same family as covrt and cobalt, with LFOs alongside keyframes, a real automation timeline, undo, and looks you can keep in a file.
+
+Try it at https://atlas-crt.nathanetes.com
+
+### Added
+
+- **LFOs on any control.** The diamond next to a control now offers Off, Keyframes or LFO, and each control keeps both, so switching loses nothing. Eight shapes: sine, triangle, ramp, saw, square, random, drift, and one you draw yourself. Rate runs from 0.02 to 20 Hz, with Depth and Offset, and the shape has its own controls in the spirit of Ableton's LFO and Serum's warp modes: **Smooth** takes Random from hard steps to a continuous glide, **Jitter** drifts the timing, **Bend** and **Symmetry** warp the cycle, **Phase** sets the start, and **Steps** quantizes the output. LFOs export exactly as they preview.
+- **Automation timeline.** A panel along the bottom (or top) with one lane per automated control, stacked like Ableton's automation lanes. Double-click to add a keyframe, drag to move it, drag the dot on a line to bend it, and drag across a lane to select several. LFO lanes draw what the LFO will do. The panel beside the lanes has exact time and value fields and the velocity curve editor. It zooms, snaps to frames or a grid, and lanes resize and bypass. Add parameter opens a searchable list of every control.
+- **Moiré Screen,** a new Camera look built on what you found: aperture grille moiré at a low scale, with Moiré Angle, Tube Curvature, Camera Position and Moiré Rings each on a slow random LFO, so bold rainbow streaks keep bending across the picture on their own.
+- **Undo and redo,** with buttons in the top bar and ⌘Z and ⇧⌘Z. The clock button lists everything you've changed this session, so you can jump back to any point.
+- **Export and import looks.** Under Mine, Export all saves your looks to a file, and Import adds them back on any device, without replacing what you have. Each look can be exported on its own.
+- **Your looks are harder to lose.** They're now copied to a second store in the browser and restored from it if the main copy disappears. Atlas also asks the browser to keep them, and deleting a look offers Undo.
+- **Direction for Pixel Smear and Circuit Bend.** Smear Direction points the trail any way around the circle, and Direction in Circuit Bend turns the ringing and the way it crawls.
+- **Settings.** System, Light, Dark and Terminal themes (Terminal is the original green look), any accent color, three text sizes, the controls on either side, the timeline on top, on the bottom or hidden, and which modules show and in what order. Drag the gaps between panels to resize them.
+- **Search** across every control on the Adjust tab, **pinned controls** at the top of it, and click any value to type an exact number.
+- **Tools** in the top bar links to covrt and cobalt, and a finished export points you to them for other formats. They stay separate apps on their own addresses.
+
+### Changed
+
+- **The interface is rebuilt** on the design system covrt and cobalt share: the same type, spacing, rounded cards, pill buttons and light and dark themes. Atlas keeps its own name, mark and phosphor green. It opens in Dark, since a dark surround is the honest way to judge a picture.
+- **The timeline is now a set length on photos and the test card.** Length in the timeline bar sets it, and exporting records it once.
+- **Dust looks like dust.** The wavy vertical line is gone. Specks are now irregular flecks, and scratches are a separate control, off by default, that runs perfectly straight.
+- Files can be dropped anywhere on the page.
+
+### Removed
+
+- The automation list on the Adjust tab. The timeline replaces it.
+
+### Known limitations
+
+- **Looks saved at another address stay there.** Browsers file saved data by exact address, so looks saved before the site moved to its current https address can't be reached from here. Saved looks at this address are safe from now on, and an exported file is safe anywhere.
+- **History lasts until you reload the page.** Your settings and automation are still saved between visits.
+- **Automation from before v2.3.0-beta** comes back as an LFO if it's still in a saved look. Automation dropped from a session by v2.3.0-beta is gone.
+- **Looks that used Dust** no longer include scratches. Raise Scratches to add them back.
+- **Video export still runs in real time,** and the tab has to stay in front while it records.
+
 ## v2.3.0-beta
 
 Keyframes with a curve editor replace waveform automation, and moiré now bends with the real shape of the tube.

@@ -17,7 +17,7 @@
     { k: 'mGlow', l: 'Glow', keys: ['glow', 'postGlow', 'halation', 'spectral', 'pbloom'] },
     { k: 'mMoire', l: 'Moiré', keys: ['moire', 'rainbow', 'capture'] },
     { k: 'mColor', l: 'Color', keys: ['preSat', 'preTemp', 'preTint', 'preHue', 'chroma', 'hueDrift', 'bleed', 'rgbSplit', 'conv', 'hue', 'sat', 'temp', 'tintGM', 'shAmt', 'hiAmt', 'gmap', 'cross', 'solar', 'grunge'] },
-    { k: 'mGrime', l: 'Grime', keys: ['shake', 'tear', 'roll', 'flash', 'dropout', 'hum', 'echo', 'headSwitch', 'topLine', 'rf', 'grain', 'film', 'dust', 'weave', 'sync', 'ripple', 'flicker'] },
+    { k: 'mGrime', l: 'Grime', keys: ['shake', 'tear', 'roll', 'flash', 'dropout', 'hum', 'echo', 'headSwitch', 'topLine', 'rf', 'grain', 'film', 'dust', 'scratch', 'weave', 'sync', 'ripple', 'flicker'] },
     { k: 'mCorrupt', l: 'Corrupt', keys: ['mosh', 'blockGlitch', 'slices', 'smear', 'compress', 'crush', 'bend', 'waves'] },
   ].map((m) => ({ ...m, min: 0, max: 2, step: 0.01, d: 1 }));
 
@@ -86,6 +86,7 @@
         amt('blockGlitch', 'Block Glitch', 0, { dirt: 1 }),
         amt('slices', 'Slice Shift', 0, { dirt: 1 }),
         amt('smear', 'Pixel Smear', 0, { dirt: 1 }),
+        { k: 'smearDir', l: 'Smear Direction', min: 0, max: 360, step: 1, d: 0, u: '°' },
         { k: 'smearThresh', l: 'Smear Threshold', min: 0, max: 1, step: 0.01, d: 0.6 },
         amt('compress', 'Compression', 0, { dirt: 1 }),
         amt('crush', 'Bit Crush'),
@@ -95,6 +96,7 @@
       id: 'bend', title: 'Circuit Bend', hint: 'A resonant, nonlinear stage that rings after edges and folds over.',
       controls: [
         amt('bend', 'Amount', 0, { dirt: 1 }),
+        { k: 'bendDir', l: 'Direction', min: 0, max: 360, step: 1, d: 0, u: '°' },
         { k: 'bendMotion', l: 'Motion', min: -1, max: 1, step: 0.01, d: 0.2 },
         { k: 'bendFreq', l: 'Frequency', min: 0.05, max: 5.5, step: 0.01, d: 1.8, u: 'MHz' },
         { k: 'bendQ', l: 'Q', min: 0.25, max: 30, step: 0.05, d: 6 },
@@ -128,7 +130,8 @@
         { k: 'filmColor', l: 'Grain Color', min: 0, max: 1, step: 0.01, d: 0.3, u: 'mono → rgb' },
         { k: 'filmResp', l: 'Grain Response', min: 0, max: 1, step: 0.01, d: 0.5, u: 'shadows → highlights' },
         { k: 'filmVar', l: 'Grain Variation', min: 0, max: 1, step: 0.01, d: 0.3 },
-        amt('dust', 'Dust & Scratches'),
+        amt('dust', 'Dust'),
+        amt('scratch', 'Scratches'),
         { k: 'dustOpacity', l: 'Dust Opacity', min: 0, max: 1, step: 0.01, d: 1 },
         amt('weave', 'Gate Weave'),
         amt('grain', 'Tape Grain', 0.04, { dirt: 1 }),
@@ -224,6 +227,9 @@
   // takes when its module is switched off) is set to it; the rest only shape effects that are off.
   const INIT = Object.fromEntries(ALL.filter(c => c.n !== undefined).map(c => [c.k, c.n]));
 
+  // a slow random LFO that glides from value to value, for a factory look
+  const wander = (rate, depth, seed) => ({ mode: 'lfo', lfo: { wave: 'random', rate, depth, smooth: 1, seed } });
+
   // Factory looks. Each is a full look laid over DEFAULTS, in a category from CATS.
   const PRESETS = [
     { cat: 'TV', name: 'Init', p: INIT },
@@ -246,6 +252,8 @@
 
     // Camera: the tube seen through a lens and a sensor
     { cat: 'Camera', name: 'Pixel Moiré', p: { rainbow: 0.85, moire: 0.3, moireScale: 0.07, moireGrid: 2, moireCells: 0.5, moireColor: 0.6, moireCover: 0.5, moirePitch: 0.2, moireAngle: 0, moireRings: 0.05, moireDrift: 0.15, scanlines: 0.6, bleed: 0.3, sharpen: 0.3, rgbSplit: 0.25, grain: 0.1, curve: 0.15, vignette: 0.4, glow: 0.2 } },
+    { cat: 'Camera', name: 'Moiré Screen', p: { rainbow: 1, moire: 0.5, moireScale: 0.14, moireGrid: 1, moireCells: 0.1, moireColor: 1, moireCover: 0.8, moirePitch: 0.06, moireAngle: 0, moireCurve: 0.5, moireView: 0, moireRings: 0, moireDrift: 0.1, scanlines: 0.5, curve: 0.15, vignette: 0.35, glow: 0.2 },
+      auto: { moireAngle: wander(0.27, 0.09, 3.1), moireCurve: wander(0.19, 0.42, 5.7), moireView: wander(0.23, 0.55, 8.2), moireRings: wander(0.21, 0.5, 11.4) } },
     { cat: 'Camera', name: 'Phone Off Screen', p: { maskType: 1, maskScale: 0.1, phosphor: 0.8, rainbow: 0.6, moire: 0.3, moireGrid: 4, moireCover: 0.3, moirePitch: 0.3, moireAngle: 2, moireRings: 0.35, moireDrift: 0.1, curve: 0.2, glow: 0.3, halation: 0.3, softness: 0.4, temp: 0.15, film: 0.1 } },
     { cat: 'Camera', name: 'Rainbow Grille', p: { maskType: 1, maskScale: 0.08, phosphor: 0.9, rainbow: 0.85, moire: 0.4, moireGrid: 4, moireCover: 0.2, moirePitch: 0.15, moireAngle: 0.5, moireRings: -0.5, moireDrift: 0.1, curve: 0.3, glow: 0.3, scanlines: 0.5 } },
     { cat: 'Camera', name: 'Filmed Off TV', p: { capture: 0.7, shutter: 48, refresh: 59.94, pulseContrast: 0.8, rainbow: 0.35, moire: 0.2, moireGrid: 4, moireCover: 0.2, moireDrift: 0.1, maskType: 0, maskScale: 0.12, phosphor: 0.8, scanlines: 0.7, curve: 0.5, glow: 0.4, conv: 0.25, overscan: 0.15, persistence: 0.3, film: 0.15 } },
