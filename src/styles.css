@@ -143,8 +143,8 @@ h1, h2, h3, p { margin: 0; }
 :root[data-rack="left"] .work { grid-template-columns: minmax(280px, var(--rack-w)) var(--gap) minmax(0, 1fr); }
 :root[data-rack="left"] .rack { order: -2; }
 :root[data-rack="left"] .resizer-x { order: -1; }
-:root[data-tl="top"] .timeline { order: -1; }
-:root[data-tl="top"] .nav { order: -2; }
+:root[data-tl="top"] .nav { order: -3; }
+:root[data-tl="top"] .timeline { order: -2; }
 :root[data-tl="top"] .resizer-y { order: -1; }
 :root[data-tl="top"] .work { padding-bottom: var(--gap); }
 :root[data-tl="hidden"] .timeline, :root[data-tl="hidden"] .resizer-y { display: none; }

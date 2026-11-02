@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.2.1-beta
+
+### Fixed
+
+- **Spacing with the timeline on top.** The gap sat above the timeline instead of below it, so the timeline touched the preview and controls, and the resize handle was on the wrong side. It now sits between them, matching the other panels.
+
 ## v3.2.0-beta
 
 Atlas grows from a CRT emulator into a creative tool: custom glitches, big color moves, a rebuilt moiré camera, details under every control, and a frame-accurate Pro export.
