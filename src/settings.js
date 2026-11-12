@@ -182,11 +182,35 @@
       group('Modules', moduleList()),
       group('Your looks', el('p', 'fineprint', 'Looks are kept in this browser, at this address. A file keeps them safe anywhere.'), dataRow),
       group('Keyboard', shortcuts()),
+      group('Your computer', ...systemInfo()),
       reset,
     );
   }
 
-  $('settingsBtn').onclick = () => { K.closePops(); render(); dlg.showModal(); };
+  // what Atlas asks of the machine, and what this one reports about itself
+  function systemInfo() {
+    const gl = K.engine.gl;
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    let gpu = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+    // ANGLE reports "Vendor, [ANGLE Metal Renderer: ]Name (0x…) Direct3D11 …, Version"; keep the name
+    const parts = gpu.replace(/^ANGLE \((.*)\)$/, '$1').split(', ');
+    if (parts.length >= 3) gpu = parts.slice(1, -1).join(', ');
+    gpu = gpu.replace(/^ANGLE \w+ Renderer: /, '').replace(/\s*\(0x[0-9a-f]+\)/i, '').replace(/\s+(Direct3D|OpenGL|Vulkan).*$/i, '').slice(0, 90);
+    if (/^(WebKit WebGL|Mozilla)$/.test(gpu)) gpu = ''; // the browser keeps the real name private
+    const facts = [
+      gpu && ['Graphics', gpu],
+      navigator.hardwareConcurrency && ['Processor', navigator.hardwareConcurrency + ' threads'],
+      navigator.deviceMemory && ['Memory', 'at least ' + navigator.deviceMemory + ' GB'],
+      ['Pro export', window.VideoEncoder ? 'Available' : 'Not in this browser. Quick still works'],
+    ].filter(Boolean);
+    return [
+      el('p', 'fineprint', 'Minimum: WebGL2 graphics (integrated from about 2017 on, or any Apple Silicon Mac), 4 cores and 8 GB of memory. 4K exports, moiré and long clips run best with a faster GPU and 16 GB.'),
+      ...facts.map(([label, value]) => row(label, el('span', 'fineprint', value))),
+      el('p', 'fineprint', 'Warm fans are normal: like any video effects app, Atlas keeps the GPU busy. Pausing while you adjust, a smaller window, the fitted view, and VHS and moiré off while you work keep it cooler.'),
+    ];
+  }
+
+  $('settingsBtn').onclick =() => { K.closePops(); render(); dlg.showModal(); };
   dlg.addEventListener('click', (e) => {
     if (e.target === dlg || e.target.closest('[data-close]')) dlg.close();
   });

@@ -131,6 +131,16 @@
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
 
+    // Forget the frames that came before: phosphor persistence, the motion and datamosh buffers, the
+    // glitch history Freeze holds, and the tape stage's last frame. An export calls this once it has
+    // moved to the start, so nothing from where the playhead was bleeds into its first frames.
+    resetHistory() {
+      if (!this.sig) return;
+      [this.sig, this.low, this.mosh, this.fx].forEach((pair) => pair.forEach((t) => this._clear(t)));
+      this.moshFresh = true;
+      this.tapeKey = null;
+    }
+
     _free(t) {
       if (!t) return;
       this.gl.deleteTexture(t.tex);

@@ -11,6 +11,21 @@ Everything renders on the GPU with WebGL2, on your machine. Nothing is uploaded 
 Atlas CRT lives at atlas-crt.nathanetes.com
 You can access the latest release there.
 
+## What your computer needs
+
+Atlas does the work of a video effects app inside a browser tab: every frame runs through about twenty GPU passes, and the VHS stage runs on the CPU. These are a rough guide, not tested limits.
+
+| | Minimum | Recommended |
+| --- | --- | --- |
+| Browser | A current Chrome, Edge, Safari or Firefox with WebGL2 | Chrome or Edge, for the widest Pro export support |
+| Graphics | Any GPU that runs WebGL2: integrated graphics from about 2017 on (Intel UHD 620, AMD Vega 8), or any Apple Silicon Mac | Apple M1 Pro or newer, or a dedicated card (NVIDIA GTX 1660, AMD RX 5600 or better) for 4K exports, moiré and large screens |
+| Processor | 4 cores | 6 or more fast cores. VHS Amount runs ntsc-rs on one core, 30 times a second |
+| Memory | 8 GB | 16 GB for 4K, or clips longer than a few minutes |
+
+- **Pro export** needs WebCodecs. Where a browser doesn't have it, the export panel offers Quick only.
+- **Pro keeps the finished file in memory** until you save it. At Maximum quality (80 Mb/s), that's about 600 MB a minute, and a clip's sound is decoded whole before it's encoded.
+- **Heat and fan noise are expected,** as with After Effects or a game: the GPU redraws the whole picture at screen resolution every frame. While paused, Atlas only draws when something changes, so pausing while you adjust gives the GPU a rest. On a laptop, plug in. To run cooler, make the window smaller, stay in fitted view instead of 100%, and turn off VHS Amount and moiré while you work on other things.
+
 ## Using it
 
 1. Click **$ open photo/video** or drag a file onto the preview. The app starts on a built-in test card with the default settings, so you can see the effects right away.
