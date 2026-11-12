@@ -237,13 +237,34 @@
     return true;
   }
 
-  const showVideoFrame = (t) => new Promise((res) => {
+  // Moves the paused clip to t and resolves once that frame can be drawn. With `presented`, it also
+  // waits for the browser to show a frame from the new place: just after a seek, some browsers still
+  // hand WebGL the frame from before it.
+  const showVideoFrame = (t, presented = false) => new Promise((res) => {
     const v = src.el;
-    if (Math.abs(v.currentTime - t) < 1e-4) { res(); return; }
-    const done = () => { v.removeEventListener('seeked', done); res(); };
-    v.addEventListener('seeked', done);
-    v.currentTime = t;
-    setTimeout(done, 3000);
+    let over = false;
+    const finish = () => {
+      if (over) return;
+      over = true;
+      clearTimeout(timer);
+      ['seeked', 'loadeddata', 'canplay'].forEach((e) => v.removeEventListener(e, check));
+      res();
+    };
+    const timer = setTimeout(finish, 3000);
+    const ready = () => !v.seeking && v.readyState >= 2;
+    const waitShown = () => {
+      if (!presented || !v.requestVideoFrameCallback) { finish(); return; }
+      const fallback = setTimeout(finish, 500);
+      const onFrame = (now, meta) => {
+        if (over) return;
+        if (Math.abs(meta.mediaTime - t) < 0.25) { clearTimeout(fallback); finish(); } else v.requestVideoFrameCallback(onFrame);
+      };
+      v.requestVideoFrameCallback(onFrame);
+    };
+    function check() { if (ready()) { ['seeked', 'loadeddata', 'canplay'].forEach((e) => v.removeEventListener(e, check)); waitShown(); } }
+    ['seeked', 'loadeddata', 'canplay'].forEach((e) => v.addEventListener(e, check));
+    if (Math.abs(v.currentTime - t) > 1e-6) v.currentTime = t;
+    check();
   });
 
   async function renderPro() {
@@ -292,9 +313,11 @@
     try {
       for (let i = 0; i < frames && !job.cancelled && !job.failed; i++) {
         const t = i / pro.fps;
-        if (isVideo) await showVideoFrame(t);
-        K.seek(t);
+        // a second seek here would leave the clip mid-seek, and the engine would draw its last frame again
+        if (isVideo) await showVideoFrame(t, i === 0);
+        else K.seek(t);
         if (src.kind === 'sample') src.el.draw(t);
+        if (i === 0) { E.resetHistory(); E.render(K.effective(), t, i, { uSplit: -1, uTl: t }); } // fill the history with the first frame
         E.render(K.effective(), t, i, { uSplit: -1, uTl: t });
         const frame = new VideoFrame(canvas, { timestamp: Math.round(t * 1e6), duration: Math.round(1e6 / pro.fps) });
         enc.encode(frame, { keyFrame: i % (pro.fps * 2) === 0 });
@@ -330,6 +353,12 @@
       return;
     }
     finish(mp4.finish());
+  }
+
+  // drop the frames from where the playhead was, and fill the history with the first frame instead
+  function freshStart() {
+    K.engine.resetHistory();
+    K.engine.render(K.effective(), K.clockNow(), 0, { uSplit: -1, uTl: K.timeNow() });
   }
 
   async function start() {
@@ -370,17 +399,16 @@
     if (isVideo) {
       const v = src.el;
       v.pause(); v.loop = false;
-      await new Promise((res) => {
-        const done = () => { v.removeEventListener('seeked', done); res(); };
-        v.addEventListener('seeked', done);
-        v.currentTime = 0;
-        setTimeout(done, 1500);
-      });
+      // the first frame has to be on screen before recording starts, or the clip opens on where the playhead was
+      await showVideoFrame(0, true);
+      if (!job || job.cancelled) return;
+      freshStart();
       v.onended = () => { if (job && job.phase === 'recording') stop(); };
       rec.start(500);
       v.play().catch(() => { toast('The clip would not play, so recording stopped.'); job.cancelled = true; stop(); });
     } else {
       K.seek(0); // keyframes and LFOs play from the start of the timeline
+      freshStart();
       rec.start(500);
     }
     job.started = performance.now();

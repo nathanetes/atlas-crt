@@ -136,7 +136,8 @@
   K.timeNow = () => (src.kind === 'video' ? src.el.currentTime : tl);
   K.seek = (t) => {
     t = Math.max(0, Math.min(t, K.timelineLength()));
-    if (src.kind === 'video') src.el.currentTime = t;
+    // setting currentTime starts a new seek even to the same time, and the frame is unreadable until it ends
+    if (src.kind === 'video') { if (Math.abs(src.el.currentTime - t) > 1e-6) src.el.currentTime = t; }
     else tl = t;
   };
   K.live = {};
@@ -357,6 +358,22 @@
   // ------------------------------------------------------------ render loop
   K.clockNow = () => clock;
   K.hooks = [];
+
+  // While paused, the picture only changes when something feeds it: a control, the view, a seek, a
+  // new source. Each frame sums those up, and once they hold still the GPU rests instead of drawing
+  // the same frame again. It keeps drawing a moment longer first, so phosphor trails fade out.
+  const SETTLE_FRAMES = 90;
+  let idleKey = '', settle = 0;
+  function idleSignature(params, split) {
+    const v = src.kind === 'video' ? src.el : null;
+    return JSON.stringify(params) + '|' + [
+      split, K.timeNow(), canvas.width, canvas.height, engine.outW, engine.outH, engine.expW, engine.viewW,
+      engine.quality, engine.ratio, engine.fill, engine.srcDirty, engine.tape.ready,
+      v ? v.readyState : '', v ? v.seeking : '', src.name, src.w, src.h,
+    ].join();
+  }
+  K.redraw = () => { idleKey = ''; };
+
   function tick(now) {
     requestAnimationFrame(tick);
     const dt = Math.min(0.1, (now - last) / 1000);
@@ -370,7 +387,13 @@
     }
     if (src.kind === 'sample' && running) src.el.draw(clock);
     const split = state.compare && !K.recording ? state.split : -1;
-    engine.render(K.effective(), clock, frame, { uSplit: split, uTl: K.timeNow() });
+    const params = K.effective();
+    const key = running ? '' : idleSignature(params, split);
+    if (running || key !== idleKey) { idleKey = key; settle = SETTLE_FRAMES; }
+    if (settle > 0) {
+      settle--;
+      engine.render(params, clock, frame, { uSplit: split, uTl: K.timeNow() });
+    }
     K.hooks.forEach((fn) => fn(now));
     updateTime();
   }

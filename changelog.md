@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.2.2-beta
+
+### Added
+
+- **What your computer needs.** Settings has a new Your Computer section with the minimum and recommended hardware, what your machine reports (graphics, processor, memory), whether Pro export works in your browser, and tips for running cooler. The README has the full table.
+
+### Fixed
+
+- **Cooler while paused.** The preview used to redraw every effect on every screen refresh even when nothing was moving. Paused, it now draws only when something changes (a control, a seek, the view, a new file), then lets the graphics card rest. Photos and paused clips should run noticeably cooler and quieter.
+- **Pro export stuck on one frame.** A Pro render of a video kept the effects moving but showed the same frame of the clip from start to end. Every frame of the clip now comes through.
+- **Quick export started from the wrong place.** If the playhead wasn't at the start, a Quick recording could open late and flash pieces of wherever the playhead had been, most visibly with Datamosh, Freeze or phosphor persistence on. Both exports now start clean from the first frame, wherever the playhead is.
+
 ## v3.2.1-beta
 
 ### Fixed
